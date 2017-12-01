@@ -41,6 +41,11 @@ config VIRTIO_CRYPTO
     default y
     depends on VIRTIO
 
+config VIRTIO_ACCEL
+    bool
+    default y
+    depends on VIRTIO
+
 # not all virtio transports support memory devices; if none does,
 # no need to include the code
 config VIRTIO_MD_SUPPORTED
