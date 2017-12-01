@@ -298,6 +298,20 @@
   'data': { 'chardev': 'str' } }
 
 ##
+# @AcceldevBackendProperties:
+#
+# Properties for acceldev-backend and acceldev-backend-vaccelrt objects.
+#
+# @queues: the number of queues for the acceldev backend. Ignored for
+#          acceldev-backend and must be 1 for acceldev-backend-vaccelrt.
+#          (default: 1)
+#
+# Since: 2.8
+##
+{ 'struct': 'AcceldevBackendProperties',
+  'data': { '*queues': 'uint32' } }
+
+##
 # @DBusVMStateProperties:
 #
 # Properties for dbus-vmstate objects.
@@ -879,6 +893,9 @@
     'cryptodev-backend-lkcf',
     { 'name': 'cryptodev-vhost-user',
       'if': 'CONFIG_VHOST_CRYPTO' },
+    'acceldev-backend',
+    { 'name': 'acceldev-backend-vaccelrt',
+      'if': 'CONFIG_VACCEL' },
     'dbus-vmstate',
     'filter-buffer',
     'filter-dump',
@@ -948,6 +965,9 @@
       'cryptodev-backend-lkcf':     'CryptodevBackendProperties',
       'cryptodev-vhost-user':       { 'type': 'CryptodevVhostUserProperties',
                                       'if': 'CONFIG_VHOST_CRYPTO' },
+      'acceldev-backend':           'AcceldevBackendProperties',
+      'acceldev-backend-vaccelrt':  { 'type': 'AcceldevBackendProperties',
+                                      'if': 'CONFIG_VACCEL' },
       'dbus-vmstate':               'DBusVMStateProperties',
       'filter-buffer':              'FilterBufferProperties',
       'filter-dump':                'FilterDumpProperties',

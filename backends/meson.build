@@ -1,6 +1,7 @@
 softmmu_ss.add([files(
   'cryptodev-builtin.c',
   'cryptodev.c',
+  'acceldev.c',
   'hostmem-ram.c',
   'hostmem.c',
   'rng-builtin.c',
@@ -21,6 +22,9 @@ endif
 softmmu_ss.add(when: 'CONFIG_VIRTIO_CRYPTO', if_true: files('cryptodev-vhost.c'))
 if have_vhost_user_crypto
   softmmu_ss.add(when: 'CONFIG_VIRTIO_CRYPTO', if_true: files('cryptodev-vhost-user.c'))
+endif
+if vaccel.found()
+  softmmu_ss.add(when: 'CONFIG_VIRTIO_ACCEL', if_true: [vaccel, files('acceldev-vaccelrt.c')])
 endif
 softmmu_ss.add(when: gio, if_true: files('dbus-vmstate.c'))
 softmmu_ss.add(when: 'CONFIG_SGX', if_true: files('hostmem-epc.c'))

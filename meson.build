@@ -1646,6 +1646,10 @@ if libbpf.found() and not cc.links('''
   endif
 endif
 
+vaccel = cc.find_library('vaccel', has_headers: ['vaccel.h'],
+                            required: get_option('vaccel'),
+                            kwargs: static_kwargs)
+
 #################
 # config-host.h #
 #################
@@ -1924,6 +1928,7 @@ if xen.found()
     ('0' + xen_version[2]).substring(-2)
   config_host_data.set('CONFIG_XEN_CTRL_INTERFACE_VERSION', xen_ctrl_version)
 endif
+config_host_data.set('CONFIG_VACCEL', vaccel.found())
 config_host_data.set('QEMU_VERSION', '"@0@"'.format(meson.project_version()))
 config_host_data.set('QEMU_VERSION_MAJOR', meson.project_version().split('.')[0])
 config_host_data.set('QEMU_VERSION_MINOR', meson.project_version().split('.')[1])
@@ -3974,6 +3979,7 @@ summary_info += {'capstone':          capstone}
 summary_info += {'libpmem support':   libpmem}
 summary_info += {'libdaxctl support': libdaxctl}
 summary_info += {'libudev':           libudev}
+summary_info += {'vAccel support':          vaccel}
 # Dummy dependency, keep .found()
 summary_info += {'FUSE lseek':        fuse_lseek.found()}
 summary_info += {'selinux':           selinux}
