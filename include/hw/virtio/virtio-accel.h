@@ -60,7 +60,7 @@ typedef struct VirtIOAccelReq {
 	unsigned int in_niov;
 	unsigned int out_niov;
     size_t in_iov_len;
-	unsigned int status;
+	uint32_t *status;
 
     union {
         CryptoDevBackendSymOpInfo *sym_op_info;

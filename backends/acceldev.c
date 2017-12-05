@@ -52,12 +52,12 @@ void cryptodev_backend_cleanup(
     }
 }
 
-int64_t accel_backend_create_session(
-           AccelBackend *ab,
-           AccelBackendSessionInfo *sess_info,
+int64_t acceldev_backend_create_session(
+           AccelDevBackend *ab,
+           AccelDevBackendSessionInfo *sess_info,
            uint32_t queue_index, Error **errp)
 {
-    AccelBackendClass *abc =
+    AccelDevBackendClass *abc =
                       Accel_BACKEND_GET_CLASS(backend);
 
     if (abc->create_session) {
@@ -67,13 +67,13 @@ int64_t accel_backend_create_session(
     return -1;
 }
 
-int accel_backend_close_session(
-           AccelBackend *ab,
+int acceldev_backend_close_session(
+           AccelDevBackend *ab,
            uint64_t session_id,
            uint32_t queue_index, Error **errp)
 {
-    AccelBackendClass *abc =
-                      ACCEL_BACKEND_GET_CLASS(ab);
+    AccelDevBackendClass *abc =
+                      ACCELDEV_BACKEND_GET_CLASS(ab);
 
     if (bc->close_session) {
         return bc->close_session(ab, session_id, queue_index, errp);
@@ -82,58 +82,36 @@ int accel_backend_close_session(
     return -1;
 }
 
-static int cryptodev_backend_sym_operation(
-                 CryptoDevBackend *backend,
-                 CryptoDevBackendSymOpInfo *op_info,
+int acceldev_backend_crypto_operation(
+                 AccelDevBackend *ab,
+                 AccelDevBackendOpInfo *op_info,
                  uint32_t queue_index, Error **errp)
 {
-    CryptoDevBackendClass *bc =
-                      CRYPTODEV_BACKEND_GET_CLASS(backend);
+	AccelDevBackendClass *abc =
+                      ACCELDEV_BACKEND_GET_CLASS(ab);
 
-    if (bc->do_sym_op) {
-        return bc->do_sym_op(backend, op_info, queue_index, errp);
-    }
-
-    return -VIRTIO_CRYPTO_ERR;
-}
-
-int cryptodev_backend_crypto_operation(
-                 CryptoDevBackend *backend,
-                 void *opaque,
-                 uint32_t queue_index, Error **errp)
-{
-    VirtIOCryptoReq *req = opaque;
-
-    if (req->flags == CRYPTODEV_BACKEND_ALG_SYM) {
-        CryptoDevBackendSymOpInfo *op_info;
-        op_info = req->u.sym_op_info;
-
-        return cryptodev_backend_sym_operation(backend,
-                         op_info, queue_index, errp);
-    } else {
-        error_setg(errp, "Unsupported cryptodev alg type: %" PRIu32 "",
-                   req->flags);
-       return -VIRTIO_CRYPTO_NOTSUPP;
-    }
-
-    return -VIRTIO_CRYPTO_ERR;
+    if (abc->do_op) {
+        return abc->do_op(ab, op_info, queue_index, errp);
+	}
+    
+	return -VIRTIO_ACCEL_ERR;
 }
 
 static void
-accel_backend_get_queues(Object *obj, Visitor *v, const char *name,
+acceldev_backend_get_queues(Object *obj, Visitor *v, const char *name,
                              void *opaque, Error **errp)
 {
-    AccelBackend *ab = ACCEL_BACKEND(obj);
+    AccelDevBackend *ab = ACCELDEV_BACKEND(obj);
     uint32_t value = ab->conf.peers.queues;
 
     visit_type_uint32(v, name, &value, errp);
 }
 
 static void
-accel_backend_set_queues(Object *obj, Visitor *v, const char *name,
+acceldev_backend_set_queues(Object *obj, Visitor *v, const char *name,
                              void *opaque, Error **errp)
 {
-    AccelBackend *ab = ACCEL_BACKEND(obj);
+    AccelDevBackend *ab = ACCELDEV_BACKEND(obj);
     Error *local_err = NULL;
     uint32_t value;
 
@@ -152,10 +130,10 @@ out:
 }
 
 static void
-accel_backend_complete(UserCreatable *uc, Error **errp)
+acceldev_backend_complete(UserCreatable *uc, Error **errp)
 {
-    AccelDevBackend *ab = ACCEL_BACKEND(uc);
-    AccelBackendClass *abc = ACCEL_BACKEND_GET_CLASS(uc);
+    AccelDevBackend *ab = ACCELDEV_BACKEND(uc);
+    AccelDevBackendClass *abc = ACCELDEV_BACKEND_GET_CLASS(uc);
     Error *local_err = NULL;
 
     if (abc->init) {
@@ -167,68 +145,68 @@ accel_backend_complete(UserCreatable *uc, Error **errp)
     return;
 }
 
-void accel_backend_set_used(AccelBackend *ab, bool used)
+void acceldev_backend_set_used(AccelDevBackend *ab, bool used)
 {
     ab->is_used = used;
 }
 
-bool accel_backend_is_used(AccelBackend *ab)
+bool acceldev_backend_is_used(AccelDevBackend *ab)
 {
     return ab->is_used;
 }
 
-void accel_backend_set_ready(AccelBackend *ab, bool ready)
+void acceldev_backend_set_ready(AccelDevBackend *ab, bool ready)
 {
     ab->ready = ready;
 }
 
-bool accel_backend_is_ready(AccelBackend *ab)
+bool acceldev_backend_is_ready(AccelDevBackend *ab)
 {
     return ab->ready;
 }
 
 static bool
-accel_backend_can_be_deleted(UserCreatable *uc, Error **errp)
+acceldev_backend_can_be_deleted(UserCreatable *uc, Error **errp)
 {
-    return !accel_backend_is_used(ACCEL_BACKEND(uc));
+    return !acceldev_backend_is_used(ACCELDEV_BACKEND(uc));
 }
 
-static void accel_backend_instance_init(Object *obj)
+static void acceldev_backend_instance_init(Object *obj)
 {
     object_property_add(obj, "queues", "int",
-                          accel_backend_get_queues,
-                          accel_backend_set_queues,
+                          acceldev_backend_get_queues,
+                          acceldev_backend_set_queues,
                           NULL, NULL, NULL);
     /* Initialize devices' queues property to 1 */
     object_property_set_int(obj, 1, "queues", NULL);
 }
 
-static void accel_backend_finalize(Object *obj)
+static void acceldev_backend_finalize(Object *obj)
 {
-    AccelBackend *ab = CRYPTODEV_BACKEND(obj);
+    AccelDevBackend *ab = CRYPTODEV_BACKEND(obj);
 
-    accel_backend_cleanup(ab, NULL);
+    acceldev_backend_cleanup(ab, NULL);
 }
 
 static void
-accel_backend_class_init(ObjectClass *oc, void *data)
+acceldev_backend_class_init(ObjectClass *oc, void *data)
 {
     UserCreatableClass *ucc = USER_CREATABLE_CLASS(oc);
 
-    ucc->complete = accel_backend_complete;
-    ucc->can_be_deleted = accel_backend_can_be_deleted;
+    ucc->complete = acceldev_backend_complete;
+    ucc->can_be_deleted = acceldev_backend_can_be_deleted;
 
     QTAILQ_INIT(&accel_clients);
 }
 
-static const TypeInfo accel_backend_info = {
-    .name = TYPE_ACCEL_BACKEND,
+static const TypeInfo acceldev_backend_info = {
+    .name = TYPE_ACCELDEV_BACKEND,
     .parent = TYPE_OBJECT,
-    .instance_size = sizeof(AccelBackend),
-    .instance_init = accel_backend_instance_init,
-    .instance_finalize = accel_backend_finalize,
-    .class_size = sizeof(AccelBackendClass),
-    .class_init = accel_backend_class_init,
+    .instance_size = sizeof(AccelDevBackend),
+    .instance_init = acceldev_backend_instance_init,
+    .instance_finalize = acceldev_backend_finalize,
+    .class_size = sizeof(AccelDevBackendClass),
+    .class_init = acceldev_backend_class_init,
     .interfaces = (InterfaceInfo[]) {
         { TYPE_USER_CREATABLE },
         { }
@@ -236,9 +214,9 @@ static const TypeInfo accel_backend_info = {
 };
 
 static void
-accel_backend_register_types(void)
+acceldev_backend_register_types(void)
 {
-    type_register_static(&accel_backend_info);
+    type_register_static(&acceldev_backend_info);
 }
 
-type_init(accel_backend_register_types);
+type_init(acceldev_backend_register_types);
