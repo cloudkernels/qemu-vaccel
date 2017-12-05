@@ -7,23 +7,23 @@
 
 
 /**
- * @TYPE_ACCEL_BACKEND_CRYPTO:
+ * @TYPE_ACCELDEV_BACKEND_CRYPTO:
  * name of backend that uses QEMU cipher API
  */
-#define TYPE_ACCEL_BACKEND_CRYPTO "cryptodev-backend-builtin"
+#define TYPE_ACCELDEV_BACKEND_CRYPTO "cryptodev-backend-builtin"
 
-#define ACCEL_BACKEND_CRYPTO(obj) \
-    OBJECT_CHECK(AccelBackendCrypto, \
-                 (obj), TYPE_ACCEL_BACKEND_CRYPTO)
+#define ACCELDEV_BACKEND_CRYPTO(obj) \
+    OBJECT_CHECK(AccelDevBackendCrypto, \
+                 (obj), TYPE_ACCELDEV_BACKEND_CRYPTO)
 
-typedef struct AccelBackendCrypto
-                         AccelBackendCrypto;
+typedef struct AccelDevBackendCrypto
+                         AccelDevBackendCrypto;
 
-typedef struct AccelBackendCryptoSession {
+typedef struct AccelDevBackendCryptoSession {
     QCryptoCipher *cipher;
     uint8_t type; /* cipher? hash? aead? */
-    QTAILQ_ENTRY(AccelBackendCryptoSession) next;
-} AccelBackendCryptoSession;
+    QTAILQ_ENTRY(AccelDevBackendCryptoSession) next;
+} AccelDevBackendCryptoSession;
 
 /* Max number of symmetric sessions */
 #define MAX_NUM_SESSIONS 256
@@ -31,10 +31,10 @@ typedef struct AccelBackendCryptoSession {
 #define ACCEL_BUITLIN_MAX_AUTH_KEY_LEN    512
 #define ACCEL_BUITLIN_MAX_CIPHER_KEY_LEN  64
 
-struct AccelBackendCrypto {
-    AccelBackend parent_obj;
+struct AccelDevBackendCrypto {
+    AccelDevBackend parent_obj;
 
-    AccelBackendCryptoSession *sessions[MAX_NUM_SESSIONS];
+    AccelDevBackendCryptoSession *sessions[MAX_NUM_SESSIONS];
 };
 
 static void cryptodev_builtin_init(
@@ -75,8 +75,8 @@ static void cryptodev_builtin_init(
 }
 
 static int
-accel_crypto_get_unused_session_index(
-                 AccelBackendCrypto *crypto)
+acceldev_crypto_get_unused_session_index(
+                 AccelDevBackendCrypto *crypto)
 {
     size_t i;
 
@@ -96,7 +96,7 @@ accel_crypto_get_unused_session_index(
 #define AES_KEYSIZE_256_XTS 64
 
 static int
-accel_crypto_get_aes_algo(uint32_t key_len, int mode, Error **errp)
+acceldev_crypto_get_aes_algo(uint32_t key_len, int mode, Error **errp)
 {
     int algo;
 
@@ -127,16 +127,16 @@ err:
    return -1;
 }
 
-static int accel_crypto_create_cipher_session(
-                    AccelBackendCrypto *crypto,
-                    AccelBackendCreateSessionInfo *sess_info,
+static int acceldev_crypto_create_cipher_session(
+                    AccelDevBackendCrypto *crypto,
+                    AccelDevBackendCreateSessionInfo *sess_info,
                     Error **errp)
 {
     int algo;
     int mode;
     QCryptoCipher *cipher;
     int index;
-    AccelBackendCryptoSession *sess;
+    AccelDevBackendCryptoSession *sess;
 
     if (sess_info->op != VIRTIO_ACCEL_CRYPTO_ENCRYPT ||
 			sess_info->op != VIRTIO_ACCEL_CRYPTO_DECRYPT) {
@@ -144,7 +144,7 @@ static int accel_crypto_create_cipher_session(
         return -1;
     }
 
-    index = accel_crypto_get_unused_session_index(crypto);
+    index = acceldev_crypto_get_unused_session_index(crypto);
     if (index < 0) {
         error_setg(errp, "Total number of sessions created exceeds %u",
                   MAX_NUM_SESSIONS);
@@ -154,7 +154,7 @@ static int accel_crypto_create_cipher_session(
     switch (sess_info->cipher) {
     case VIRTIO_ACCEL_CIPHER_AES_ECB:
         mode = QCRYPTO_CIPHER_MODE_ECB;
-        algo = accel_crypto_get_aes_algo(sess_info->key_len,
+        algo = acceldev_crypto_get_aes_algo(sess_info->key_len,
                                                     mode, errp);
         if (algo < 0)  {
             return -1;
@@ -162,7 +162,7 @@ static int accel_crypto_create_cipher_session(
         break;
     case VIRTIO_ACCEL_CIPHER_AES_CBC:
         mode = QCRYPTO_CIPHER_MODE_CBC;
-        algo = accel_crypto_get_aes_algo(sess_info->key_len,
+        algo = acceldev_crypto_get_aes_algo(sess_info->key_len,
                                                     mode, errp);
         if (algo < 0)  {
             return -1;
@@ -170,7 +170,7 @@ static int accel_crypto_create_cipher_session(
         break;
     case VIRTIO_ACCEL_CIPHER_AES_CTR:
         mode = QCRYPTO_CIPHER_MODE_CTR;
-        algo = accel_crypto_get_aes_algo(sess_info->key_len,
+        algo = acceldev_crypto_get_aes_algo(sess_info->key_len,
                                                     mode, errp);
         if (algo < 0)  {
             return -1;
@@ -212,7 +212,7 @@ static int accel_crypto_create_cipher_session(
         return -1;
     }
 
-    sess = g_new0(AccelBackendCryptoSession, 1);
+    sess = g_new0(AccelDevBackendCryptoSession, 1);
     sess->cipher = cipher;
 
     crypto->sessions[index] = sess;
@@ -220,19 +220,19 @@ static int accel_crypto_create_cipher_session(
     return index;
 }
 
-static int64_t accel_crypto_sym_create_session(
-           AccelBackend *ab,
-           AccelBackendCreateSessionInfo *sess_info,
+static int64_t acceldev_crypto_sym_create_session(
+           AccelDevBackend *ab,
+           AccelDevBackendCreateSessionInfo *sess_info,
            uint32_t queue_index, Error **errp)
 {
-    AccelBackendCrypto *crypto =
-                      ACCEL_BACKEND_CRYPTO(ab);
+    AccelDevBackendCrypto *crypto =
+                      ACCELDEV_BACKEND_CRYPTO(ab);
     int32_t sess_id = -1;
     int ret;
 
     switch (sess_info->op_code) {
     case VIRTIO_ACCEL_CRYPTO_CIPHER_CREATE_SESSION:
-        ret = accel_crypto_cipher_create_session(
+        ret = acceldev_crypto_cipher_create_session(
                            crypto, sess_info, errp);
         if (ret < 0) {
             return ret;
@@ -255,7 +255,7 @@ static int cryptodev_builtin_sym_close_session(
            uint32_t queue_index, Error **errp)
 {
     CryptoDevBackendBuiltin *builtin =
-                      ACCEL_BACKEND_CRYPTO(backend);
+                      ACCELDEV_BACKEND_CRYPTO(backend);
 
     if (session_id >= MAX_NUM_SESSIONS ||
               builtin->sessions[session_id] == NULL) {
@@ -270,53 +270,49 @@ static int cryptodev_builtin_sym_close_session(
     return 0;
 }
 
-static int cryptodev_builtin_sym_operation(
-                 CryptoDevBackend *backend,
-                 CryptoDevBackendSymOpInfo *op_info,
+static int acceldev_crypto_sym_operation(
+                 AccelDevBackend *ab,
+                 AccelDevBackendOpInfo *info,
                  uint32_t queue_index, Error **errp)
 {
-    CryptoDevBackendBuiltin *builtin =
-                      ACCEL_BACKEND_CRYPTO(backend);
-    CryptoDevBackendBuiltinSession *sess;
+    AccelDevBackendCrypto *crypto =
+                      ACCELDEV_BACKEND_CRYPTO(ab);
+    AccelDevBackendCryptoSession *sess;
     int ret;
 
-    if (op_info->session_id >= MAX_NUM_SESSIONS ||
-              builtin->sessions[op_info->session_id] == NULL) {
+    if (info->session_id >= MAX_NUM_SESSIONS ||
+              crypto->sessions[info->session_id] == NULL) {
         error_setg(errp, "Cannot find a valid session id: %" PRIu64 "",
-                   op_info->session_id);
-        return -VIRTIO_CRYPTO_INVSESS;
+                   info->session_id);
+        return -VIRTIO_ACCEL_INVSESS;
     }
 
-    if (op_info->op_type == VIRTIO_CRYPTO_SYM_OP_ALGORITHM_CHAINING) {
-        error_setg(errp,
-               "Algorithm chain is unsupported for cryptdoev-builtin");
-        return -VIRTIO_CRYPTO_NOTSUPP;
-    }
+    sess = crypto->sessions[info->session_id];
 
-    sess = builtin->sessions[op_info->session_id];
-
-    if (op_info->iv_len > 0) {
+	/* TODO
+    if (info->iv_len > 0) {
         ret = qcrypto_cipher_setiv(sess->cipher, op_info->iv,
                                    op_info->iv_len, errp);
         if (ret < 0) {
             return -VIRTIO_CRYPTO_ERR;
         }
     }
+	*/
 
-    if (sess->direction == VIRTIO_CRYPTO_OP_ENCRYPT) {
-        ret = qcrypto_cipher_encrypt(sess->cipher, op_info->src,
-                                     op_info->dst, op_info->src_len, errp);
+    if (info.op == VIRTIO_ACCEL_CRYPTO_CIPHER_ENCRYPT) {
+        ret = qcrypto_cipher_encrypt(sess->cipher, info->src,
+                                     info->dst, info->src_len, errp);
         if (ret < 0) {
-            return -VIRTIO_CRYPTO_ERR;
+            return -VIRTIO_ACCEL_ERR;
         }
     } else {
         ret = qcrypto_cipher_decrypt(sess->cipher, op_info->src,
                                      op_info->dst, op_info->src_len, errp);
         if (ret < 0) {
-            return -VIRTIO_CRYPTO_ERR;
+            return -VIRTIO_ACCEL_ERR;
         }
     }
-    return VIRTIO_CRYPTO_OK;
+    return VIRTIO_ACCEL_OK;
 }
 
 static void cryptodev_builtin_cleanup(
@@ -324,7 +320,7 @@ static void cryptodev_builtin_cleanup(
              Error **errp)
 {
     CryptoDevBackendBuiltin *builtin =
-                      ACCEL_BACKEND_CRYPTO(backend);
+                      ACCELDEV_BACKEND_CRYPTO(backend);
     size_t i;
     int queues = backend->conf.peers.queues;
     CryptoDevBackendClient *cc;
@@ -350,18 +346,18 @@ static void cryptodev_builtin_cleanup(
 static void
 cryptodev_builtin_class_init(ObjectClass *oc, void *data)
 {
-    CryptoDevBackendClass *bc = ACCEL_BACKEND_CLASS(oc);
+    CryptoDevBackendClass *bc = ACCELDEV_BACKEND_CLASS(oc);
 
     bc->init = cryptodev_builtin_init;
     bc->cleanup = cryptodev_builtin_cleanup;
-    bc->create_session = accel_crypto_sym_create_session;
-    bc->close_session = accel_crypto_sym_close_session;
-    bc->do_op = cryptodev_builtin_sym_operation;
+    bc->create_session = acceldev_crypto_sym_create_session;
+    bc->close_session = acceldev_crypto_sym_close_session;
+    bc->do_op = acceldev_crypto_sym_operation;
 }
 
 static const TypeInfo cryptodev_builtin_info = {
-    .name = TYPE_ACCEL_BACKEND_CRYPTO,
-    .parent = TYPE_ACCEL_BACKEND,
+    .name = TYPE_ACCELDEV_BACKEND_CRYPTO,
+    .parent = TYPE_ACCELDEV_BACKEND,
     .class_init = cryptodev_builtin_class_init,
     .instance_size = sizeof(CryptoDevBackendBuiltin),
 };

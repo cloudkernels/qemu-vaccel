@@ -16,43 +16,27 @@
 #define TYPE_ACCEL_BACKEND "accel-backend"
 
 #define ACCEL_BACKEND(obj) \
-    OBJECT_CHECK(AccelBackend, \
+    OBJECT_CHECK(AccelDevBackend, \
                  (obj), TYPE_ACCEL_BACKEND)
 #define ACCEL_BACKEND_GET_CLASS(obj) \
-    OBJECT_GET_CLASS(AccelBackendClass, \
+    OBJECT_GET_CLASS(AccelDevBackendClass, \
                  (obj), TYPE_ACCEL_BACKEND)
 #define ACCEL_BACKEND_CLASS(klass) \
-    OBJECT_CLASS_CHECK(AccelBackendClass, \
+    OBJECT_CLASS_CHECK(AccelDevBackendClass, \
                 (klass), TYPE_ACCEL_BACKEND)
 
 
 #define MAX_CRYPTO_QUEUE_NUM  64
 
-typedef struct AccelBackendConf AccelBackendConf;
-typedef struct AccelBackendPeers AccelBackendPeers;
-typedef struct AccelBackendClient AccelBackendClient;
-typedef struct AccelBackend AccelBackend;
+typedef struct AccelDevBackendConf AccelDevBackendConf;
+typedef struct AccelDevBackendPeers AccelDevBackendPeers;
+typedef struct AccelDevBackendClient AccelDevBackendClient;
+typedef struct AccelDevBackend AccelDevBackend;
 
 enum CryptoDevBackendAlgType {
     CRYPTODEV_BACKEND_ALG_SYM,
     CRYPTODEV_BACKEND_ALG__MAX,
 };
-
-typedef struct AccelBackendSessionInfoCrypto {
-    /* corresponding with virtio crypto spec */
-    uint32_t cipher;
-    uint32_t keylen;
-    uint32_t hash_alg;
-    uint32_t hash_result_len;
-    uint32_t auth_key_len;
-    uint32_t add_len;
-    uint8_t op_type;
-    uint8_t direction;
-    uint8_t hash_mode;
-    uint8_t alg_chain_order;
-    uint8_t *cipher_key;
-    uint8_t *auth_key;
-} AccelBackendSessionInfo;
 
 /**
  * CryptoDevBackendSymSessionInfo:
@@ -73,12 +57,27 @@ typedef struct AccelBackendSessionInfoCrypto {
  * @auth_key: point to an authenticated key of MAC
  *
  */
-typedef struct AccelBackendSessionInfo {
+typedef struct AccelDevBackendCryptoSessionInfo {
+    /* corresponding with virtio crypto spec */
+    uint32_t cipher;
+    uint32_t keylen;
+    uint32_t hash_alg;
+    uint32_t hash_result_len;
+    uint32_t auth_key_len;
+    uint32_t add_len;
+    uint8_t op_type;
+    uint8_t hash_mode;
+    uint8_t alg_chain_order;
+    uint8_t *cipher_key;
+    uint8_t *auth_key;
+} AccelDevBackendCryptoSessionInfo;
+
+typedef struct AccelDevBackendSessionInfo {
     uint32_t op;
 	union {
-		AccelBackendSessionInfoCrypto crypto;
+		AccelDevBackendCryptoSessionInfo crypto;
 	} u;
-} AccelBackendSessionInfo;
+} AccelDevBackendSessionInfo;
 
 /**
  * CryptoDevBackendSymOpInfo:
@@ -109,8 +108,7 @@ typedef struct AccelBackendSessionInfo {
  * @data[0]: point to the extensional memory by one memory allocation
  *
  */
-typedef struct CryptoDevBackendSymOpInfo {
-    uint64_t session_id;
+typedef struct AccelDevBackendCryptoSymOpInfo {
     uint32_t aad_len;
     uint32_t iv_len;
     uint32_t src_len;
@@ -120,14 +118,22 @@ typedef struct CryptoDevBackendSymOpInfo {
     uint32_t cipher_start_src_offset;
     uint32_t len_to_hash;
     uint32_t len_to_cipher;
-    uint8_t op_type;
     uint8_t *iv;
     uint8_t *src;
     uint8_t *dst;
     uint8_t *aad_data;
     uint8_t *digest_result;
     uint8_t data[0];
-} CryptoDevBackendSymOpInfo;
+} AccelDevBackendCryptoSymOpInfo;
+
+typedef struct AccelDevBackendOpInfo {
+    uint32_t op;
+    uint32_t session_id;
+	union {
+		AccelDevBackendCryptoSymOpInfo crypto;
+	} u;
+} AccelDevBackendOpInfo;
+
 
 typedef struct CryptoDevBackendClass {
     ObjectClass parent_class;
@@ -135,14 +141,14 @@ typedef struct CryptoDevBackendClass {
     void (*init)(CryptoDevBackend *backend, Error **errp);
     void (*cleanup)(CryptoDevBackend *backend, Error **errp);
 
-    int64_t (*create_session)(CryptoDevBackend *backend,
-                       CryptoDevBackendSymSessionInfo *sess_info,
+    int64_t (*create_session)(AccelDevBackend *ab,
+                       AccelDevBackendSessionInfo *sess_info,
                        uint32_t queue_index, Error **errp);
     int (*close_session)(CryptoDevBackend *backend,
                            uint64_t session_id,
                            uint32_t queue_index, Error **errp);
-    int (*do_sym_op)(CryptoDevBackend *backend,
-                     CryptoDevBackendSymOpInfo *op_info,
+    int (*do_op)(AccelDevBackend *ab,
+                     AccelDevBackendOpInfo *op_info,
                      uint32_t queue_index, Error **errp);
 } CryptoDevBackendClass;
 
