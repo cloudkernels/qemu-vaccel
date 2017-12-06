@@ -127,7 +127,7 @@ err:
    return -1;
 }
 
-static int acceldev_crypto_create_cipher_session(
+static int acceldev_crypto_cipher_create_session(
                     AccelDevBackendCrypto *crypto,
                     AccelDevBackendCreateSessionInfo *sess_info,
                     Error **errp)
@@ -141,14 +141,14 @@ static int acceldev_crypto_create_cipher_session(
     if (sess_info->op != VIRTIO_ACCEL_CRYPTO_ENCRYPT ||
 			sess_info->op != VIRTIO_ACCEL_CRYPTO_DECRYPT) {
         error_setg(errp, "Unsupported optype :%u", sess_info->op_type);
-        return -1;
+        return -VIRTIO_ACCEL_ERR;
     }
 
     index = acceldev_crypto_get_unused_session_index(crypto);
     if (index < 0) {
         error_setg(errp, "Total number of sessions created exceeds %u",
                   MAX_NUM_SESSIONS);
-        return -1;
+        return -VIRTIO_ACCEL_ERR;
     }
 
     switch (sess_info->cipher) {
@@ -157,7 +157,7 @@ static int acceldev_crypto_create_cipher_session(
         algo = acceldev_crypto_get_aes_algo(sess_info->key_len,
                                                     mode, errp);
         if (algo < 0)  {
-            return -1;
+            return -VIRTIO_ACCEL_ERR;
         }
         break;
     case VIRTIO_ACCEL_CIPHER_AES_CBC:
@@ -165,7 +165,7 @@ static int acceldev_crypto_create_cipher_session(
         algo = acceldev_crypto_get_aes_algo(sess_info->key_len,
                                                     mode, errp);
         if (algo < 0)  {
-            return -1;
+            return -VIRTIO_ACCEL_ERR;
         }
         break;
     case VIRTIO_ACCEL_CIPHER_AES_CTR:
@@ -173,7 +173,7 @@ static int acceldev_crypto_create_cipher_session(
         algo = acceldev_crypto_get_aes_algo(sess_info->key_len,
                                                     mode, errp);
         if (algo < 0)  {
-            return -1;
+            return -VIRTIO_ACCEL_ERR;
         }
         break;
 /*
@@ -201,7 +201,7 @@ static int acceldev_crypto_create_cipher_session(
 	default:
         error_setg(errp, "Unsupported cipher alg :%u",
                    sess_info->cipher_alg);
-        return -1;
+        return -VIRTIO_ACCEL_ERR;
     }
 
     cipher = qcrypto_cipher_new(algo, mode,
@@ -209,7 +209,7 @@ static int acceldev_crypto_create_cipher_session(
                                sess_info->key_len,
                                errp);
     if (!cipher) {
-        return -1;
+        return -VIRTIO_ACCEL_ERR;
     }
 
     sess = g_new0(AccelDevBackendCryptoSession, 1);
@@ -227,7 +227,7 @@ static int64_t acceldev_crypto_sym_create_session(
 {
     AccelDevBackendCrypto *crypto =
                       ACCELDEV_BACKEND_CRYPTO(ab);
-    int32_t sess_id = -1;
+    int32_t sess_id = -VIRTIO_ACCEL_ERR;
     int ret;
 
     switch (sess_info->op_code) {
@@ -243,31 +243,32 @@ static int64_t acceldev_crypto_sym_create_session(
     default:
         error_setg(errp, "Unsupported opcode :%" PRIu32 "",
                    sess_info->op_code);
-        return -1;
+        return -VIRTIO_ACCEL_ERR;
     }
 
     return sess_id;
 }
 
-static int cryptodev_builtin_sym_close_session(
-           CryptoDevBackend *backend,
-           uint64_t session_id,
+static int acceldev_crypto_sym_destroy_session(
+           AccelDevBackend *ab,
+           uint32_t sess_id,
            uint32_t queue_index, Error **errp)
 {
-    CryptoDevBackendBuiltin *builtin =
-                      ACCELDEV_BACKEND_CRYPTO(backend);
+    AccelDevBackendCrypto *crypto =
+                      ACCELDEV_BACKEND_CRYPTO(ab);
 
-    if (session_id >= MAX_NUM_SESSIONS ||
-              builtin->sessions[session_id] == NULL) {
+    if (info->session_id >= MAX_NUM_SESSIONS ||
+              crypto->sessions[info->session_id] == NULL) {
         error_setg(errp, "Cannot find a valid session id: %" PRIu64 "",
-                      session_id);
-        return -1;
+                   info->session_id);
+        return -VIRTIO_ACCEL_INVSESS;
     }
 
-    qcrypto_cipher_free(builtin->sessions[session_id]->cipher);
-    g_free(builtin->sessions[session_id]);
-    builtin->sessions[session_id] = NULL;
-    return 0;
+    qcrypto_cipher_free(crypto->sessions[sess_id]->cipher);
+    g_free(crypto->sessions[sess_id]);
+    crypto->sessions[sess_id] = NULL;
+
+    return VIRTIO_ACCEL_OK;
 }
 
 static int acceldev_crypto_sym_operation(
@@ -351,7 +352,7 @@ cryptodev_builtin_class_init(ObjectClass *oc, void *data)
     bc->init = cryptodev_builtin_init;
     bc->cleanup = cryptodev_builtin_cleanup;
     bc->create_session = acceldev_crypto_sym_create_session;
-    bc->close_session = acceldev_crypto_sym_close_session;
+    bc->destroy_session = acceldev_crypto_sym_destroy_session;
     bc->do_op = acceldev_crypto_sym_operation;
 }
 

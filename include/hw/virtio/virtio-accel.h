@@ -1,10 +1,10 @@
 #ifndef _QEMU_VIRTIO_ACCEL_H
 #define _QEMU_VIRTIO_ACCEL_H
 
-#include "standard-headers/linux/virtio_crypto.h"
+#include "standard-headers/linux/virtio_accel.h"
 #include "hw/virtio/virtio.h"
 #include "sysemu/iothread.h"
-#include "sysemu/cryptodev.h"
+#include "sysemu/acceldev.h"
 
 
 #define DEBUG_VIRTIO_ACCEL 0
@@ -60,7 +60,7 @@ typedef struct VirtIOAccelReq {
 	unsigned int in_niov;
 	unsigned int out_niov;
     size_t in_iov_len;
-	uint32_t *status;
+	uint32_t status;
 
     union {
         CryptoDevBackendSymOpInfo *sym_op_info;
