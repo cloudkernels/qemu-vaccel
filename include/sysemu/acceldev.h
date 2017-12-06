@@ -144,8 +144,8 @@ typedef struct CryptoDevBackendClass {
     int64_t (*create_session)(AccelDevBackend *ab,
                        AccelDevBackendSessionInfo *sess_info,
                        uint32_t queue_index, Error **errp);
-    int (*close_session)(CryptoDevBackend *backend,
-                           uint64_t session_id,
+    int (*destroy_session)(AccelDevBackend *ab,
+                           uint32_t session_id,
                            uint32_t queue_index, Error **errp);
     int (*do_op)(AccelDevBackend *ab,
                      AccelDevBackendOpInfo *op_info,

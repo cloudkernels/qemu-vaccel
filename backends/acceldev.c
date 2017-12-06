@@ -64,10 +64,10 @@ int64_t acceldev_backend_create_session(
         return abc->create_session(ab, sess_info, queue_index, errp);
     }
 
-    return -1;
+    return -VIRTIO_ACCEL_ERR;
 }
 
-int acceldev_backend_close_session(
+int acceldev_backend_destroy_session(
            AccelDevBackend *ab,
            uint64_t session_id,
            uint32_t queue_index, Error **errp)
@@ -75,14 +75,14 @@ int acceldev_backend_close_session(
     AccelDevBackendClass *abc =
                       ACCELDEV_BACKEND_GET_CLASS(ab);
 
-    if (bc->close_session) {
-        return bc->close_session(ab, session_id, queue_index, errp);
+    if (abc->destroy_session) {
+        return abc->destroy_session(ab, session_id, queue_index, errp);
     }
 
-    return -1;
+    return -VIRTIO_ACCEL_ERR;
 }
 
-int acceldev_backend_crypto_operation(
+int acceldev_backend_operation(
                  AccelDevBackend *ab,
                  AccelDevBackendOpInfo *op_info,
                  uint32_t queue_index, Error **errp)
