@@ -24,27 +24,25 @@ do { \
         OBJECT_GET_PARENT_CLASS(obj, TYPE_VIRTIO_ACCEL)
 
 
-typedef struct VirtIOCryptoConf {
-    CryptoDevBackend *cryptodev;
-
-    /* Supported service mask */
-    uint32_t crypto_services;
-
-    /* Detailed algorithms mask */
-    uint32_t cipher_algo_l;
-    uint32_t cipher_algo_h;
-    uint32_t hash_algo;
-    uint32_t mac_algo_l;
-    uint32_t mac_algo_h;
-    uint32_t aead_algo;
-
+typedef struct VirtIOAccelCryptoConf {
     /* Maximum length of cipher key */
     uint32_t max_cipher_key_len;
     /* Maximum length of authenticated key */
     uint32_t max_auth_key_len;
+} VirtIOAccelCryptoConf;
+
+typedef struct VirtIOAccelConf {
+    AccelDevBackend *acceldev;
+
+    /* Supported service mask */
+    uint32_t services;
     /* Maximum size of each crypto request's content */
     uint64_t max_size;
-} VirtIOCryptoConf;
+
+	union {
+		struct VirtIOAccelCryptoConf crypto;
+	} u;
+} VirtIOAccelConf;
 
 struct VirtIOAccel;
 
@@ -66,12 +64,6 @@ typedef struct VirtIOAccelReq {
         CryptoDevBackendSymOpInfo *sym_op_info;
     } u;
 } VirtIOAccelReq;
-
-typedef struct VirtIOCryptoQueue {
-    VirtQueue *dataq;
-    QEMUBH *dataq_bh;
-    struct VirtIOCrypto *vcrypto;
-} VirtIOCryptoQueue;
 
 typedef struct VirtIOAccel {
     VirtIODevice parent_obj;

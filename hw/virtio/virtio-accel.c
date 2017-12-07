@@ -369,13 +369,13 @@ static void virtio_accel_init_config(VirtIODevice *vdev)
 {
     VirtIOAccel *vaccel = VIRTIO_ACCEL(vdev);
 
-    vaccel->conf.accel_services =
-                     vaccel->conf.accel->conf.accel_services;
-    vaccel->conf.max_cipher_key_len =
-                  vaccel->conf.accel->conf.max_cipher_key_len;
-    vaccel->conf.max_auth_key_len =
-                  vaccel->conf.accel->conf.max_auth_key_len;
-    vaccel->conf.max_size = vaccel->conf.accel->conf.max_size;
+    vaccel->conf.services =
+                     vaccel->conf.acceldev->conf.services;
+    vaccel->conf.crypto.max_cipher_key_len =
+                  vaccel->conf.acceldev->conf.crypto.max_cipher_key_len;
+    vaccel->conf.crypto.max_auth_key_len =
+                  vaccel->conf.acceldev->conf.crypto.max_auth_key_len;
+    vaccel->conf.max_size = vaccel->conf.acceldev->conf.max_size;
 }
 
 static void virtio_accel_device_realize(DeviceState *dev, Error **errp)

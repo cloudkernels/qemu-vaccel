@@ -1,5 +1,5 @@
 #include "qemu/osdep.h"
-#include "sysemu/accel.h"
+#include "sysemu/acceldev.h"
 #include "hw/boards.h"
 #include "qapi/error.h"
 #include "standard-headers/linux/virtio_accel.h"
@@ -10,7 +10,7 @@
  * @TYPE_ACCELDEV_BACKEND_CRYPTO:
  * name of backend that uses QEMU cipher API
  */
-#define TYPE_ACCELDEV_BACKEND_CRYPTO "cryptodev-backend-builtin"
+#define TYPE_ACCELDEV_BACKEND_CRYPTO "acceldev-backend-crypto"
 
 #define ACCELDEV_BACKEND_CRYPTO(obj) \
     OBJECT_CHECK(AccelDevBackendCrypto, \
@@ -28,8 +28,8 @@ typedef struct AccelDevBackendCryptoSession {
 /* Max number of symmetric sessions */
 #define MAX_NUM_SESSIONS 256
 
-#define ACCEL_BUITLIN_MAX_AUTH_KEY_LEN    512
-#define ACCEL_BUITLIN_MAX_CIPHER_KEY_LEN  64
+#define ACCELDEV_CRYPTO_MAX_AUTH_KEY_LEN    512
+#define ACCELDEV_CRYPTO_MAX_CIPHER_KEY_LEN  64
 
 struct AccelDevBackendCrypto {
     AccelDevBackend parent_obj;
@@ -37,41 +37,36 @@ struct AccelDevBackendCrypto {
     AccelDevBackendCryptoSession *sessions[MAX_NUM_SESSIONS];
 };
 
-static void cryptodev_builtin_init(
-             CryptoDevBackend *backend, Error **errp)
+static void acceldev_crypto_init(
+             AccelDevBackend *ab, Error **errp)
 {
     /* Only support one queue */
     int queues = backend->conf.peers.queues;
-    CryptoDevBackendClient *cc;
+    AccelDevBackendClient *c;
 
     if (queues != 1) {
         error_setg(errp,
-                  "Only support one queue in cryptdov-builtin backend");
+                  "Only support one queue in acceldev-crypto backend");
         return;
     }
 
-    cc = cryptodev_backend_new_client(
-              "cryptodev-builtin", NULL);
-    cc->info_str = g_strdup_printf("cryptodev-builtin0");
-    cc->queue_index = 0;
-    backend->conf.peers.ccs[0] = cc;
+    c = acceldev_backend_new_client(
+              "acceldev-crypto", NULL);
+    c->info_str = g_strdup_printf("acceldev-crypto0");
+    c->queue_index = 0;
+    ab->conf.peers.ccs[0] = c;
 
-    backend->conf.crypto_services =
-                         1u << VIRTIO_CRYPTO_SERVICE_CIPHER |
-                         1u << VIRTIO_CRYPTO_SERVICE_HASH |
-                         1u << VIRTIO_CRYPTO_SERVICE_MAC;
-    backend->conf.cipher_algo_l = 1u << VIRTIO_CRYPTO_CIPHER_AES_CBC;
-    backend->conf.hash_algo = 1u << VIRTIO_CRYPTO_HASH_SHA1;
+    ab->conf.services = 1u << VIRTIO_ACCEL_SERVICE_CRYPTO;
     /*
      * Set the Maximum length of crypto request.
      * Why this value? Just avoid to overflow when
      * memory allocation for each crypto request.
      */
-    backend->conf.max_size = LONG_MAX - sizeof(CryptoDevBackendSymOpInfo);
-    backend->conf.max_cipher_key_len = ACCEL_BUITLIN_MAX_CIPHER_KEY_LEN;
-    backend->conf.max_auth_key_len = ACCEL_BUITLIN_MAX_AUTH_KEY_LEN;
+    ab->conf.max_size = LONG_MAX - sizeof(AccelDevBackendOpInfo);
+    ab->conf.crypto.max_cipher_key_len = ACCELDEV_CRYPTO_MAX_CIPHER_KEY_LEN;
+    ab->conf.crypto.max_auth_key_len = ACCELDEV_CRYPTO_MAX_AUTH_KEY_LEN;
 
-    cryptodev_backend_set_ready(backend, true);
+    acceldev_backend_set_ready(ab, true);
 }
 
 static int
@@ -316,57 +311,57 @@ static int acceldev_crypto_sym_operation(
     return VIRTIO_ACCEL_OK;
 }
 
-static void cryptodev_builtin_cleanup(
-             CryptoDevBackend *backend,
+static void acceldev_crypto_cleanup(
+             AccelDevBackend *ab,
              Error **errp)
 {
-    CryptoDevBackendBuiltin *builtin =
-                      ACCELDEV_BACKEND_CRYPTO(backend);
+    AccelDevBackendCrypto *crypto =
+                      ACCELDEV_BACKEND_CRYPTO(ab);
     size_t i;
-    int queues = backend->conf.peers.queues;
-    CryptoDevBackendClient *cc;
+    int queues = ab->conf.peers.queues;
+    AccelDevBackendClient *c;
 
     for (i = 0; i < MAX_NUM_SESSIONS; i++) {
-        if (builtin->sessions[i] != NULL) {
-            cryptodev_builtin_sym_close_session(
-                    backend, i, 0, errp);
+        if (crypto->sessions[i] != NULL) {
+            acceldev_crypto_sym_destroy_session(
+                    ab, i, 0, errp);
         }
     }
 
     for (i = 0; i < queues; i++) {
-        cc = backend->conf.peers.ccs[i];
-        if (cc) {
-            cryptodev_backend_free_client(cc);
-            backend->conf.peers.ccs[i] = NULL;
+        c = ab->conf.peers.ccs[i];
+        if (c) {
+            acceldev_backend_free_client(c);
+            ab->conf.peers.ccs[i] = NULL;
         }
     }
 
-    cryptodev_backend_set_ready(backend, false);
+    acceldev_backend_set_ready(ab, false);
 }
 
 static void
-cryptodev_builtin_class_init(ObjectClass *oc, void *data)
+acceldev_crypto_class_init(ObjectClass *oc, void *data)
 {
-    CryptoDevBackendClass *bc = ACCELDEV_BACKEND_CLASS(oc);
+    AccelDevBackendClass *abc = ACCELDEV_BACKEND_CLASS(oc);
 
-    bc->init = cryptodev_builtin_init;
-    bc->cleanup = cryptodev_builtin_cleanup;
-    bc->create_session = acceldev_crypto_sym_create_session;
-    bc->destroy_session = acceldev_crypto_sym_destroy_session;
-    bc->do_op = acceldev_crypto_sym_operation;
+    abc->init = acceldev_crypto_init;
+    abc->cleanup = acceldev_crypto_cleanup;
+    abc->create_session = acceldev_crypto_sym_create_session;
+    abc->destroy_session = acceldev_crypto_sym_destroy_session;
+    abc->do_op = acceldev_crypto_sym_operation;
 }
 
-static const TypeInfo cryptodev_builtin_info = {
+static const TypeInfo acceldev_crypto_info = {
     .name = TYPE_ACCELDEV_BACKEND_CRYPTO,
     .parent = TYPE_ACCELDEV_BACKEND,
-    .class_init = cryptodev_builtin_class_init,
-    .instance_size = sizeof(CryptoDevBackendBuiltin),
+    .class_init = acceldev_crypto_class_init,
+    .instance_size = sizeof(AccelDevBackendCrypto),
 };
 
 static void
-cryptodev_builtin_register_types(void)
+acceldev_crypto_register_types(void)
 {
-    type_register_static(&cryptodev_builtin_info);
+    type_register_static(&acceldev_crypto_info);
 }
 
-type_init(cryptodev_builtin_register_types);
+type_init(acceldev_crypto_register_types);

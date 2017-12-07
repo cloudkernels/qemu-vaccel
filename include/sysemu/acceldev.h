@@ -4,14 +4,6 @@
 #include "qom/object.h"
 #include "qemu-common.h"
 
-/**
- * CryptoDevBackend:
- *
- * The CryptoDevBackend object is an interface
- * for different cryptodev backends, which provides crypto
- * operation wrapper.
- *
- */
 
 #define TYPE_ACCEL_BACKEND "accel-backend"
 
@@ -26,20 +18,20 @@
                 (klass), TYPE_ACCEL_BACKEND)
 
 
-#define MAX_CRYPTO_QUEUE_NUM  64
+#define MAX_ACCEL_QUEUE_NUM  64
 
 typedef struct AccelDevBackendConf AccelDevBackendConf;
 typedef struct AccelDevBackendPeers AccelDevBackendPeers;
 typedef struct AccelDevBackendClient AccelDevBackendClient;
 typedef struct AccelDevBackend AccelDevBackend;
 
-enum CryptoDevBackendAlgType {
-    CRYPTODEV_BACKEND_ALG_SYM,
-    CRYPTODEV_BACKEND_ALG__MAX,
+enum AccelDevBackendCryptoAlgType {
+    ACCELDEV_BACKEND_CRYPTO_ALG_SYM,
+    ACCELDEV_BACKEND_CRYPTO_ALG__MAX,
 };
 
 /**
- * CryptoDevBackendSymSessionInfo:
+ * AccelDevBackendSymSessionInfo:
  *
  * @op_code: operation code (refer to virtio_crypto.h)
  * @cipher_alg: algorithm type of CIPHER
@@ -80,10 +72,10 @@ typedef struct AccelDevBackendSessionInfo {
 } AccelDevBackendSessionInfo;
 
 /**
- * CryptoDevBackendSymOpInfo:
+ * AccelDevBackendSymOpInfo:
  *
  * @session_id: session index which was previously
- *              created by cryptodev_backend_sym_create_session()
+ *              created by acceldev_backend_sym_create_session()
  * @aad_len: byte length of additional authenticated data
  * @iv_len: byte length of initialization vector or counter
  * @src_len: byte length of source data
@@ -135,11 +127,11 @@ typedef struct AccelDevBackendOpInfo {
 } AccelDevBackendOpInfo;
 
 
-typedef struct CryptoDevBackendClass {
+typedef struct AccelDevBackendClass {
     ObjectClass parent_class;
 
-    void (*init)(CryptoDevBackend *backend, Error **errp);
-    void (*cleanup)(CryptoDevBackend *backend, Error **errp);
+    void (*init)(AccelDevBackend *ab, Error **errp);
+    void (*cleanup)(AccelDevBackend *ab, Error **errp);
 
     int64_t (*create_session)(AccelDevBackend *ab,
                        AccelDevBackendSessionInfo *sess_info,
@@ -150,129 +142,127 @@ typedef struct CryptoDevBackendClass {
     int (*do_op)(AccelDevBackend *ab,
                      AccelDevBackendOpInfo *op_info,
                      uint32_t queue_index, Error **errp);
-} CryptoDevBackendClass;
+} AccelDevBackendClass;
 
 
-struct CryptoDevBackendClient {
+struct AccelDevBackendClient {
     char *model;
     char *name;
     char *info_str;
     unsigned int queue_index;
-    QTAILQ_ENTRY(CryptoDevBackendClient) next;
+    QTAILQ_ENTRY(AccelDevBackendClient) next;
 };
 
-struct CryptoDevBackendPeers {
-    CryptoDevBackendClient *ccs[MAX_CRYPTO_QUEUE_NUM];
+struct AccelDevBackendPeers {
+    AccelDevBackendClient *ccs[MAX_ACCEL_QUEUE_NUM];
     uint32_t queues;
 };
 
-struct CryptoDevBackendConf {
-    CryptoDevBackendPeers peers;
-
-    /* Supported service mask */
-    uint32_t crypto_services;
-
-    /* Detailed algorithms mask */
-    uint32_t cipher_algo_l;
-    uint32_t cipher_algo_h;
-    uint32_t hash_algo;
-    uint32_t mac_algo_l;
-    uint32_t mac_algo_h;
-    uint32_t aead_algo;
+struct AccelDevBackendCryptoConf {
     /* Maximum length of cipher key */
     uint32_t max_cipher_key_len;
     /* Maximum length of authenticated key */
     uint32_t max_auth_key_len;
-    /* Maximum size of each crypto request's content */
-    uint64_t max_size;
 };
 
-struct CryptoDevBackend {
+struct AccelDevBackendConf {
+    AccelDevBackendPeers peers;
+
+    /* Supported service mask */
+    uint32_t services;
+    /* Maximum size of each accel request's content */
+    uint64_t max_size;
+	
+	union {
+		struct AccelDevBackendCryptoConf crypto;
+	} u;
+};
+
+struct AccelDevBackend {
     Object parent_obj;
 
     bool ready;
-    /* Tag the cryptodev backend is used by virtio-crypto or not */
+    /* Tag the acceldev backend is used by virtio-accel or not */
     bool is_used;
-    CryptoDevBackendConf conf;
+    AccelDevBackendConf conf;
 };
 
 /**
- * cryptodev_backend_new_client:
- * @model: the cryptodev backend model
- * @name: the cryptodev backend name, can be NULL
+ * acceldev_backend_new_client:
+ * @model: the acceldev backend model
+ * @name: the acceldev backend name, can be NULL
  *
- * Creates a new cryptodev backend client object
+ * Creates a new acceldev backend client object
  * with the @name in the model @model.
  *
  * The returned object must be released with
- * cryptodev_backend_free_client() when no
+ * acceldev_backend_free_client() when no
  * longer required
  *
- * Returns: a new cryptodev backend client object
+ * Returns: a new acceldev backend client object
  */
-CryptoDevBackendClient *
-cryptodev_backend_new_client(const char *model,
-                                    const char *name);
-/**
- * cryptodev_backend_free_client:
- * @cc: the cryptodev backend client object
- *
- * Release the memory associated with @cc that
- * was previously allocated by cryptodev_backend_new_client()
- */
-void cryptodev_backend_free_client(
-                  CryptoDevBackendClient *cc);
+AccelDevBackendClient *
+acceldev_backend_new_client(const char *model, const char *name);
 
 /**
- * cryptodev_backend_cleanup:
- * @backend: the cryptodev backend object
+ * acceldev_backend_free_client:
+ * @cc: the acceldev backend client object
+ *
+ * Release the memory associated with @cc that
+ * was previously allocated by acceldev_backend_new_client()
+ */
+void acceldev_backend_free_client(AccelDevBackendClient *c);
+
+/**
+ * acceldev_backend_cleanup:
+ * @backend: the acceldev backend object
  * @errp: pointer to a NULL-initialized error object
  *
  * Clean the resouce associated with @backend that realizaed
  * by the specific backend's init() callback
  */
-void cryptodev_backend_cleanup(
-           CryptoDevBackend *backend,
+void acceldev_backend_cleanup(
+           AccelDevBackend *ab,
            Error **errp);
 
 /**
- * cryptodev_backend_sym_create_session:
- * @backend: the cryptodev backend object
+ * acceldev_backend_sym_create_session:
+ * @backend: the acceldev backend object
  * @sess_info: parameters needed by session creating
- * @queue_index: queue index of cryptodev backend client
+ * @queue_index: queue index of acceldev backend client
  * @errp: pointer to a NULL-initialized error object
  *
  * Create a session for symmetric algorithms
  *
  * Returns: session id on success, or -1 on error
  */
-int64_t cryptodev_backend_sym_create_session(
-           CryptoDevBackend *backend,
-           CryptoDevBackendSymSessionInfo *sess_info,
+int64_t acceldev_backend_sym_create_session(
+           AccelDevBackend *ab,
+           AccelDevBackendSymSessionInfo *sess_info,
            uint32_t queue_index, Error **errp);
 
 /**
- * cryptodev_backend_sym_close_session:
- * @backend: the cryptodev backend object
+ * acceldev_backend_sym_destroy_session:
+ * @backend: the acceldev backend object
  * @session_id: the session id
- * @queue_index: queue index of cryptodev backend client
+ * @queue_index: queue index of acceldev backend client
  * @errp: pointer to a NULL-initialized error object
  *
  * Close a session for symmetric algorithms which was previously
- * created by cryptodev_backend_sym_create_session()
+ * created by acceldev_backend_sym_create_session()
  *
  * Returns: 0 on success, or Negative on error
  */
-int cryptodev_backend_sym_close_session(
-           CryptoDevBackend *backend,
+int acceldev_backend_sym_destroy_session(
+           AccelDevBackend *ab,
            uint64_t session_id,
            uint32_t queue_index, Error **errp);
 
 /**
- * cryptodev_backend_crypto_operation:
- * @backend: the cryptodev backend object
+ * acceldev_backend_crypto_operation:
+ * @backend: the acceldev backend object
  * @opaque: pointer to a VirtIOCryptoReq object
- * @queue_index: queue index of cryptodev backend client
+ * @queue_index: queue index of acceldev backend client
  * @errp: pointer to a NULL-initialized error object
  *
  * Do crypto operation, such as encryption and
@@ -281,49 +271,49 @@ int cryptodev_backend_sym_close_session(
  * Returns: VIRTIO_CRYPTO_OK on success,
  *         or -VIRTIO_CRYPTO_* on error
  */
-int cryptodev_backend_crypto_operation(
-                 CryptoDevBackend *backend,
+int acceldev_backend_crypto_operation(
+                 AccelDevBackend *ab,
                  void *opaque,
                  uint32_t queue_index, Error **errp);
 
 /**
- * cryptodev_backend_set_used:
- * @backend: the cryptodev backend object
+ * acceldev_backend_set_used:
+ * @backend: the acceldev backend object
  * @used: ture or false
  *
- * Set the cryptodev backend is used by virtio-crypto or not
+ * Set the acceldev backend is used by virtio-crypto or not
  */
-void cryptodev_backend_set_used(CryptoDevBackend *backend, bool used);
+void acceldev_backend_set_used(AccelDevBackend *ab, bool used);
 
 /**
- * cryptodev_backend_is_used:
- * @backend: the cryptodev backend object
+ * acceldev_backend_is_used:
+ * @backend: the acceldev backend object
  *
- * Return the status that the cryptodev backend is used
+ * Return the status that the acceldev backend is used
  * by virtio-crypto or not
  *
  * Returns: true on used, or false on not used
  */
-bool cryptodev_backend_is_used(CryptoDevBackend *backend);
+bool acceldev_backend_is_used(AccelDevBackend *ab);
 
 /**
- * cryptodev_backend_set_ready:
- * @backend: the cryptodev backend object
+ * acceldev_backend_set_ready:
+ * @backend: the acceldev backend object
  * @ready: ture or false
  *
- * Set the cryptodev backend is ready or not, which is called
- * by the children of the cryptodev banckend interface.
+ * Set the acceldev backend is ready or not, which is called
+ * by the children of the acceldev banckend interface.
  */
-void cryptodev_backend_set_ready(CryptoDevBackend *backend, bool ready);
+void acceldev_backend_set_ready(AccelDevBackend *ab, bool ready);
 
 /**
- * cryptodev_backend_is_ready:
- * @backend: the cryptodev backend object
+ * acceldev_backend_is_ready:
+ * @backend: the acceldev backend object
  *
- * Return the status that the cryptodev backend is ready or not
+ * Return the status that the acceldev backend is ready or not
  *
  * Returns: true on ready, or false on not ready
  */
-bool cryptodev_backend_is_ready(CryptoDevBackend *backend);
+bool acceldev_backend_is_ready(AccelDevBackend *ab);
 
 #endif /* CRYPTODEV_H */
