@@ -10,45 +10,41 @@
 #include "hw/virtio/virtio-accel.h"
 
 
-static QTAILQ_HEAD(, CryptoDevBackendClient) crypto_clients;
+static QTAILQ_HEAD(, AccelDevBackendClient) accel_clients;
 
 
-CryptoDevBackendClient *
-cryptodev_backend_new_client(const char *model,
-                                    const char *name)
+AccelDevBackendClient *
+acceldev_backend_new_client(const char *model, const char *name)
 {
-    CryptoDevBackendClient *cc;
+    AccelDevBackendClient *c;
 
-    cc = g_malloc0(sizeof(CryptoDevBackendClient));
-    cc->model = g_strdup(model);
+    c = g_malloc0(sizeof(CryptoDevBackendClient));
+    c->model = g_strdup(model);
     if (name) {
-        cc->name = g_strdup(name);
+        c->name = g_strdup(name);
     }
 
-    QTAILQ_INSERT_TAIL(&crypto_clients, cc, next);
+    QTAILQ_INSERT_TAIL(&accel_clients, c, next);
 
-    return cc;
+    return c;
 }
 
-void cryptodev_backend_free_client(
-                  CryptoDevBackendClient *cc)
+void acceldev_backend_free_client(AccelDevBackendClient *c)
 {
-    QTAILQ_REMOVE(&crypto_clients, cc, next);
-    g_free(cc->name);
-    g_free(cc->model);
-    g_free(cc->info_str);
-    g_free(cc);
+    QTAILQ_REMOVE(&accel_clients, c, next);
+    g_free(c->name);
+    g_free(c->model);
+    g_free(c->info_str);
+    g_free(c);
 }
 
-void cryptodev_backend_cleanup(
-             CryptoDevBackend *backend,
-             Error **errp)
+void acceldev_backend_cleanup(AccelDevBackend *ab, Error **errp)
 {
-    CryptoDevBackendClass *bc =
-                  CRYPTODEV_BACKEND_GET_CLASS(backend);
+    AccelDevBackendClass *abc =
+                  ACCELDEV_BACKEND_GET_CLASS(ab);
 
-    if (bc->cleanup) {
-        bc->cleanup(backend, errp);
+    if (abc->cleanup) {
+        abc->cleanup(ab, errp);
     }
 }
 
