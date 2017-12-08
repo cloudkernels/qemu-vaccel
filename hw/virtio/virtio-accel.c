@@ -81,27 +81,27 @@ virtio_accel_crypto_create_session(VirtIOAccelReq *req)
 	int ret = -VIRTIO_ACCEL_ERR;
     Error *local_err = NULL;
 
-	if (h->crypto_sess.keylen > vaccel->conf.max_cipher_key_len) {
+	if (h->u.crypto_sess.keylen > vaccel->conf.max_cipher_key_len) {
         error_report("virtio-accel length of cipher key is too big: %u",
-                     h->crypto_sess.keylen);
+                     h->u.crypto_sess.keylen);
         return -VIRTIO_ACCEL_ERR;
     }
 
-	if (h->crypto_sess.keylen > 0) {
+	if (h->u.crypto_sess.keylen > 0) {
 		size_t s;
-		h->crypto_sess.key = g_malloc(h->crypto_sess.keylen);
-		s = iov_to_buf(req->in_iov, req->in_niov, 0, h->crypto_sess.key,
-				h->crypto_sess.keylen);
-        if (unlikely(s != h->crypto_sess.keylen)) {
+		h->u.crypto_sess.key = g_malloc(h->u.crypto_sess.keylen);
+		s = iov_to_buf(req->in_iov, req->in_niov, 0, h->u.crypto_sess.key,
+				h->u.crypto_sess.keylen);
+        if (unlikely(s != h->u.crypto_sess.keylen)) {
             virtio_error(vdev, "virtio-accel cipher key incorrect");
             ret = -EFAULT;
 			goto out;
         }
 	}
 
-    info.u.crypto.cipher_key = h->crypto_sess.key;
-    info.u.crypto.keylen = h->crypto_sess.keylen;
-    info.u.crypto.cipher = h->crypto_sess.cipher;
+    info.u.crypto.cipher_key = h->u.crypto_sess.key;
+    info.u.crypto.keylen = h->u.crypto_sess.keylen;
+    info.u.crypto.cipher = h->u.crypto_sess.cipher;
 	sess_id = acceldev_backend_create_session(
                                      vaccel->crypto,
                                      &info, queue_index, &local_err);
@@ -150,10 +150,7 @@ virtio_accel_crypto_destroy_session(VirtIOAccelReq *req)
 }
 
 static int
-virtio_accel_crypto_do_op(VirtIOAccelReq *req,
-               struct virtio_crypto_sym_data_req *req,
-               CryptoDevBackendSymOpInfo **sym_op_info,
-               struct iovec *iov, unsigned int out_num)
+virtio_accel_crypto_do_op(VirtIOAccelReq *req)
 {
 	VirtIOAccel *vaccel = req->vaccel;
     VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
@@ -164,12 +161,15 @@ virtio_accel_crypto_do_op(VirtIOAccelReq *req,
     Error *local_err = NULL;
     int ret;
 
-	info.op = req->hdr.op;
-	info.session_id = req->hdr.session_id;
-	info.u.crypto.src_len = req->hdr.crypto_op.src_len;
-	info.u.crypto.src = info.u.crypto.dst = req->hdr.crypto_op.src;
+	info.op = h->op;
+	info.session_id = h->session_id;
+	info.u.crypto.src_len = h->u.crypto_op.src_len;
+	info.u.crypto.src = info.u.crypto.dst = h->u.crypto_op.src;
+	info.u.crypto.dst_len = h->u.crypto_op.dst_len;
+	info.u.crypto.dst = info.u.crypto.dst = h->u.crypto_op.dst;
     switch (req->hdr.op) {
 	case VIRTIO_ACCEL_CRYPTO_CIPHER_ENCRYPT:
+	case VIRTIO_ACCEL_CRYPTO_CIPHER_DECRYPT:
 		ret = acceldev_backend_operation(vaccel->crypto,
 								&info, queue_index, &local_err);
 		break;
@@ -185,7 +185,6 @@ virtio_accel_crypto_do_op(VirtIOAccelReq *req,
         if (local_err) {
             error_report_err(local_err);
         }
-        ret = -ret;
     }
 
     return ret;
@@ -241,9 +240,9 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
     req->hdr.op = virtio_ldl_p(vdev, &hdr.op);
     switch (op) {
 	case VIRTIO_ACCEL_CRYPTO_CIPHER_CREATE_SESSION:
-		req->hdr.crypto_sess.cipher = virtio_ldl_p(
+		req->hdr.u.crypto_sess.cipher = virtio_ldl_p(
 				vdev, &hdr.crypto_sess.cipher);
-		req->hdr.crypto_sess.keylen = virtio_ldl_p(
+		req->hdr.u.crypto_sess.keylen = virtio_ldl_p(
 				vdev, &hdr.crypto_sess.keylen);
 		
 		ret = virtio_accel_crypto_create_session(req);
@@ -263,6 +262,24 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
 		ret = virtio_accel_crypto_destroy_session(req);
 		/* Serious errors, need to reset virtio crypto device */
 		if (ret == -EFAULT)
+			return -1;
+
+        virtio_accel_complete_request(req, ret);
+        virtio_accel_free_request(req);
+		break;
+    case VIRTIO_ACCEL_CRYPTO_CIPHER_ENCRYPT:
+    case VIRTIO_ACCEL_CRYPTO_CIPHER_DECRYPT:
+		req->hdr.session_id = virtio_ldl_p(vdev, &hdr.session_id);
+		req->hdr.u.crypto_op.src_len = virtio_ldl_p(
+				vdev, &hdr.u.crypto_op.src_len);
+		req->hdr.u.crypto_op.src = in_iov[0]->iov_base;
+		req->hdr.u.crypto_op.dst_len = virtio_ldl_p(
+				vdev, &hdr.u.crypto_op.dst_len);
+		req->hdr.u.crypto_op.dst = in_iov[1]->iov_base;
+
+		ret = virtio_accel_crypto_do_op(req);
+		/* Serious errors, need to reset virtio crypto device */
+ 		if (ret == -EFAULT)
 			return -1;
 
         virtio_accel_complete_request(req, ret);
