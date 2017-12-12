@@ -32,7 +32,7 @@ typedef struct VirtIOAccelCryptoConf {
 } VirtIOAccelCryptoConf;
 
 typedef struct VirtIOAccelConf {
-    AccelDevBackend *acceldev;
+    AccelDevBackend *crypto;
 
     /* Supported service mask */
     uint32_t services;
@@ -47,6 +47,7 @@ typedef struct VirtIOAccelConf {
 struct VirtIOAccel;
 
 typedef struct VirtIOAccelReq {
+    VirtQueue *vq;
     VirtQueueElement elem;
     /* flags of operation, such as type of algorithm */
     uint32_t flags;
@@ -58,26 +59,27 @@ typedef struct VirtIOAccelReq {
 	unsigned int in_niov;
 	unsigned int out_niov;
     size_t in_iov_len;
-	uint32_t status;
-
-    union {
-        CryptoDevBackendSymOpInfo *sym_op_info;
-    } u;
+	uint32_t *in_status;
 } VirtIOAccelReq;
+
+typedef struct VirtIOAccelQueue {
+    VirtQueue *dataq;
+    QEMUBH *dataq_bh;
+	struct VirtIOAccel *vaccel;
+} VirtIOAccelQueue;
 
 typedef struct VirtIOAccel {
     VirtIODevice parent_obj;
 
-    VirtQueue *vq;
     VirtIOAccelQueue *vqs;
     VirtIOAccelConf conf;
-    AccelBackend *crypto;
+    AccelDevBackend *crypto;
 
     uint32_t max_queues;
     uint32_t status;
 
     int multiqueue;
-    uint32_t curr_queues;
+    uint32_t curr_queue;
     size_t config_size;
 } VirtIOAccel;
 

@@ -1,15 +1,3 @@
-/*
- * Virtio crypto Support
- *
- * Copyright (c) 2016 HUAWEI TECHNOLOGIES CO., LTD.
- *
- * Authors:
- *    Gonglei <arei.gonglei@huawei.com>
- *
- * This work is licensed under the terms of the GNU GPL, version 2 or
- * (at your option) any later version.  See the COPYING file in the
- * top-level directory.
- */
 #include "qemu/osdep.h"
 #include "qemu/iov.h"
 #include "hw/qdev.h"
@@ -19,20 +7,21 @@
 #include "hw/virtio/virtio.h"
 #include "hw/virtio/virtio-accel.h"
 #include "hw/virtio/virtio-access.h"
-#include "standard-headers/linux/virtio_ids.h"
 
-#define VIRTIO_CRYPTO_VM_VERSION 1
+#define VIRTIO_ACCEL_VM_VERSION 1
 
-static void virtio_accel_init_request(VirtIOAccel *vaccel, VirtIOAccelReq *req)
+static void virtio_accel_init_request(VirtIOAccelReq *req,
+					VirtIOAccel *vaccel, VirtQueue *vq)
 {
     req->flags = 0;
+	req->vq = vq;
     req->vaccel = vaccel;
     req->in_iov = NULL;
     req->out_iov = NULL;
     req->in_niov = 0;
     req->out_niov = 0;
     req->in_iov_len = 0;
-    req->status = VIRTIO_ACCEL_ERR;
+    req->in_status = NULL;
 }
 
 static void virtio_accel_free_request(VirtIOAccelReq *req)
@@ -52,7 +41,7 @@ static void virtio_accel_complete_request(VirtIOAccelReq *req, int ret)
 	else
 		status = (uint32_t)ret;
 
-	virtio_stl_p(&req->status, status);
+	virtio_stl_p(vdev, req->in_status, status);
     virtqueue_push(req->vq, &req->elem, req->in_iov_len);
     virtio_notify(vdev, req->vq);
 }
@@ -63,7 +52,7 @@ virtio_accel_get_request(VirtIOAccel *va, VirtQueue *vq)
     VirtIOAccelReq *req = virtqueue_pop(vq, sizeof(VirtIOAccelReq));
 
     if (req) {
-        virtio_accel_init_request(va, req);
+        virtio_accel_init_request(req, va, vq);
     }
     return req;
 }
@@ -73,15 +62,14 @@ virtio_accel_crypto_create_session(VirtIOAccelReq *req)
 {
     VirtIOAccel *vaccel = req->vaccel;
     VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
-    VirtQueueElement *elem = &req->elem;
 	struct virtio_accel_hdr *h = &req->hdr;
-    int queue_index = virtio_get_queue_index(vaccel->vq);
+    int queue_index = virtio_get_queue_index(req->vq);
     AccelDevBackendSessionInfo info;
     int64_t sess_id;
 	int ret = -VIRTIO_ACCEL_ERR;
     Error *local_err = NULL;
 
-	if (h->u.crypto_sess.keylen > vaccel->conf.max_cipher_key_len) {
+	if (h->u.crypto_sess.keylen > vaccel->conf.u.crypto.max_cipher_key_len) {
         error_report("virtio-accel length of cipher key is too big: %u",
                      h->u.crypto_sess.keylen);
         return -VIRTIO_ACCEL_ERR;
@@ -126,16 +114,14 @@ static int
 virtio_accel_crypto_destroy_session(VirtIOAccelReq *req)
 {
     VirtIOAccel *vaccel = req->vaccel;
-    VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
-    VirtQueueElement *elem = &req->elem;
 	struct virtio_accel_hdr *h = &req->hdr;
-    int queue_index = virtio_get_queue_index(vaccel->vq);
+    int queue_index = virtio_get_queue_index(req->vq);
 	int ret = -VIRTIO_ACCEL_ERR;
     Error *local_err = NULL;
 
 	ret = acceldev_backend_destroy_session(
                                      vaccel->crypto,
-                                     req->h.session_id,
+                                     h->session_id,
 									 queue_index, &local_err);
     if (ret >= 0) {
         DPRINTF("crypto destroy session_id=%" PRIu32 " successful\n",
@@ -153,10 +139,8 @@ static int
 virtio_accel_crypto_do_op(VirtIOAccelReq *req)
 {
 	VirtIOAccel *vaccel = req->vaccel;
-    VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
-    VirtQueueElement *elem = &req->elem;
 	struct virtio_accel_hdr *h = &req->hdr;
-    int queue_index = virtio_get_queue_index(vaccel->vq);
+    int queue_index = virtio_get_queue_index(req->vq);
     AccelDevBackendOpInfo info;
     Error *local_err = NULL;
     int ret;
@@ -164,12 +148,12 @@ virtio_accel_crypto_do_op(VirtIOAccelReq *req)
 	info.op = h->op;
 	info.session_id = h->session_id;
 	info.u.crypto.src_len = h->u.crypto_op.src_len;
-	info.u.crypto.src = info.u.crypto.dst = h->u.crypto_op.src;
+	info.u.crypto.src = h->u.crypto_op.src;
 	info.u.crypto.dst_len = h->u.crypto_op.dst_len;
-	info.u.crypto.dst = info.u.crypto.dst = h->u.crypto_op.dst;
+	info.u.crypto.dst = h->u.crypto_op.dst;
     switch (req->hdr.op) {
-	case VIRTIO_ACCEL_CRYPTO_CIPHER_ENCRYPT:
-	case VIRTIO_ACCEL_CRYPTO_CIPHER_DECRYPT:
+	case VIRTIO_ACCEL_C_OP_CIPHER_ENCRYPT:
+	case VIRTIO_ACCEL_C_OP_CIPHER_DECRYPT:
 		ret = acceldev_backend_operation(vaccel->crypto,
 								&info, queue_index, &local_err);
 		break;
@@ -200,8 +184,7 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
     int ret;
     struct iovec *in_iov, *out_iov;
     unsigned int in_niov, out_niov;
-    uint32_t op, sess_id, status = VIRTIO_ACCEL_ERR;
-    Error *local_err = NULL;
+    uint32_t status = VIRTIO_ACCEL_ERR;
 
     if (elem->out_num < 1 || elem->in_num < 1) {
         virtio_error(vdev, "virtio-accel request missing headers");
@@ -218,7 +201,7 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
         virtio_error(vdev, "virtio-accel request hdr too short");
         return -1;
     }
-    iov_discard_front(&out_iov, &out_niov, sizeof(*hdr));
+    iov_discard_front(&out_iov, &out_niov, sizeof(hdr));
 
     if (in_iov[in_niov - 1].iov_len <
             sizeof(status)) {
@@ -227,10 +210,10 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
     }
     /* We always touch the last byte, so just see how big in_iov is. */
     req->in_iov_len = iov_size(in_iov, in_niov);
-    req->status = (void *)in_iov[in_niov - 1].iov_base
+    req->in_status = (void *)in_iov[in_niov - 1].iov_base
               + in_iov[in_niov - 1].iov_len
-              - sizeof(*req->status);
-    iov_discard_back(in_iov, &in_niov, sizeof(*req->status));
+              - sizeof(*req->in_status);
+    iov_discard_back(in_iov, &in_niov, sizeof(*req->in_status));
 
 	req->in_iov = in_iov;
 	req->in_niov = in_niov;
@@ -238,16 +221,16 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
 	req->out_niov = out_niov;
 
     req->hdr.op = virtio_ldl_p(vdev, &hdr.op);
-    switch (op) {
-	case VIRTIO_ACCEL_CRYPTO_CIPHER_CREATE_SESSION:
+    switch (req->hdr.op) {
+	case VIRTIO_ACCEL_C_OP_CIPHER_CREATE_SESSION:
 		req->hdr.u.crypto_sess.cipher = virtio_ldl_p(
-				vdev, &hdr.crypto_sess.cipher);
+				vdev, &hdr.u.crypto_sess.cipher);
 		req->hdr.u.crypto_sess.keylen = virtio_ldl_p(
-				vdev, &hdr.crypto_sess.keylen);
+				vdev, &hdr.u.crypto_sess.keylen);
 		
 		ret = virtio_accel_crypto_create_session(req);
 		if (ret >= 0) {
-			virtio_stq_p(in_iov->iov_base, req->hdr.session_id);
+			virtio_stq_p(vdev, in_iov->iov_base, req->hdr.session_id);
 		} else {
 			/* Serious errors, need to reset virtio crypto device */
 			if (ret == -EFAULT)
@@ -256,7 +239,7 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
         virtio_accel_complete_request(req, ret);
         virtio_accel_free_request(req);
 		break;
-	case VIRTIO_ACCEL_CRYPTO_CIPHER_DESTROY_SESSION:
+	case VIRTIO_ACCEL_C_OP_CIPHER_DESTROY_SESSION:
 		req->hdr.session_id = virtio_ldl_p(vdev, &hdr.session_id);
 		
 		ret = virtio_accel_crypto_destroy_session(req);
@@ -267,15 +250,15 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
         virtio_accel_complete_request(req, ret);
         virtio_accel_free_request(req);
 		break;
-    case VIRTIO_ACCEL_CRYPTO_CIPHER_ENCRYPT:
-    case VIRTIO_ACCEL_CRYPTO_CIPHER_DECRYPT:
+    case VIRTIO_ACCEL_C_OP_CIPHER_ENCRYPT:
+    case VIRTIO_ACCEL_C_OP_CIPHER_DECRYPT:
 		req->hdr.session_id = virtio_ldl_p(vdev, &hdr.session_id);
 		req->hdr.u.crypto_op.src_len = virtio_ldl_p(
 				vdev, &hdr.u.crypto_op.src_len);
-		req->hdr.u.crypto_op.src = in_iov[0]->iov_base;
+		req->hdr.u.crypto_op.src = in_iov[0].iov_base;
 		req->hdr.u.crypto_op.dst_len = virtio_ldl_p(
 				vdev, &hdr.u.crypto_op.dst_len);
-		req->hdr.u.crypto_op.dst = in_iov[1]->iov_base;
+		req->hdr.u.crypto_op.dst = in_iov[1].iov_base;
 
 		ret = virtio_accel_crypto_do_op(req);
 		/* Serious errors, need to reset virtio crypto device */
@@ -285,19 +268,19 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
         virtio_accel_complete_request(req, ret);
         virtio_accel_free_request(req);
 		break;
-	case VIRTIO_ACCEL_CRYPTO_HASH_CREATE_SESSION:
-	case VIRTIO_ACCEL_CRYPTO_MAC_CREATE_SESSION:
-	case VIRTIO_ACCEL_CRYPTO_AEAD_CREATE_SESSION:
-	case VIRTIO_ACCEL_CRYPTO_HASH_DESTROY_SESSION:
-	case VIRTIO_ACCEL_CRYPTO_MAC_DESTROY_SESSION:
-	case VIRTIO_ACCEL_CRYPTO_AEAD_DESTROY_SESSION:
-    case VIRTIO_ACCEL_CRYPTO_HASH:
-    case VIRTIO_ACCEL_CRYPTO_MAC:
-    case VIRTIO_ACCEL_CRYPTO_AEAD_ENCRYPT:
-    case VIRTIO_ACCEL_CRYPTO_AEAD_DECRYPT:
+	case VIRTIO_ACCEL_C_OP_HASH_CREATE_SESSION:
+	case VIRTIO_ACCEL_C_OP_MAC_CREATE_SESSION:
+	case VIRTIO_ACCEL_C_OP_AEAD_CREATE_SESSION:
+	case VIRTIO_ACCEL_C_OP_HASH_DESTROY_SESSION:
+	case VIRTIO_ACCEL_C_OP_MAC_DESTROY_SESSION:
+	case VIRTIO_ACCEL_C_OP_AEAD_DESTROY_SESSION:
+    case VIRTIO_ACCEL_C_OP_HASH:
+    case VIRTIO_ACCEL_C_OP_MAC:
+    case VIRTIO_ACCEL_C_OP_AEAD_ENCRYPT:
+    case VIRTIO_ACCEL_C_OP_AEAD_DECRYPT:
     default:
         error_report("virtio-accel unsupported opcode: %u",
-                     opcode);
+                     req->hdr.op);
         virtio_accel_complete_request(req, VIRTIO_ACCEL_NOTSUPP);
         virtio_accel_free_request(req);
     }
@@ -352,8 +335,7 @@ static void
 virtio_accel_dataq_callback(VirtIODevice *vdev, VirtQueue *vq)
 {
     VirtIOAccel *vaccel = VIRTIO_ACCEL(vdev);
-    VirtIOAccelQueue *q =
-         &vaccel->vqs[virtio_accel_vq2q(virtio_get_queue_index(vq))];
+    VirtIOAccelQueue *q = &vaccel->vqs[virtio_get_queue_index(vq)];
 
     /* This happens when device was stopped but VCPU wasn't. */
     if (!vdev->vm_running) {
@@ -370,12 +352,12 @@ static uint64_t virtio_accel_get_features(VirtIODevice *vdev,
     return features;
 }
 
-static void virtio_accel_reset(VirtIOAccel *vdev)
+static void virtio_accel_reset(VirtIODevice *vdev)
 {
     VirtIOAccel *vaccel = VIRTIO_ACCEL(vdev);
     /* multiqueue is disabled by default */
-    vaccel->curr_queues = 1;
-    if (!acceldev_backend_is_ready(vaccel->accel)) {
+    vaccel->curr_queue = 1;
+    if (!acceldev_backend_is_ready(vaccel->crypto)) {
         vaccel->status &= ~VIRTIO_ACCEL_S_HW_READY;
     } else {
         vaccel->status |= VIRTIO_ACCEL_S_HW_READY;
@@ -387,12 +369,12 @@ static void virtio_accel_init_config(VirtIODevice *vdev)
     VirtIOAccel *vaccel = VIRTIO_ACCEL(vdev);
 
     vaccel->conf.services =
-                     vaccel->conf.acceldev->conf.services;
-    vaccel->conf.crypto.max_cipher_key_len =
-                  vaccel->conf.acceldev->conf.crypto.max_cipher_key_len;
-    vaccel->conf.crypto.max_auth_key_len =
-                  vaccel->conf.acceldev->conf.crypto.max_auth_key_len;
-    vaccel->conf.max_size = vaccel->conf.acceldev->conf.max_size;
+                     vaccel->conf.crypto->conf.services;
+    vaccel->conf.u.crypto.max_cipher_key_len =
+                  vaccel->conf.crypto->conf.u.crypto.max_cipher_key_len;
+    vaccel->conf.u.crypto.max_auth_key_len =
+                  vaccel->conf.crypto->conf.u.crypto.max_auth_key_len;
+    vaccel->conf.max_size = vaccel->conf.crypto->conf.max_size;
 }
 
 static void virtio_accel_device_realize(DeviceState *dev, Error **errp)
@@ -407,7 +389,7 @@ static void virtio_accel_device_realize(DeviceState *dev, Error **errp)
         return;
     }
 
-    vaccel->max_queues = MAX(vaccel->accel->conf.peers.queues, 1);
+    vaccel->max_queues = MAX(vaccel->crypto->conf.peers.queues, 1);
     if (vaccel->max_queues + 1 > VIRTIO_QUEUE_MAX) {
         error_setg(errp, "Invalid number of queues (= %" PRIu32 "), "
                    "must be a positive integer less than %d.",
@@ -416,14 +398,14 @@ static void virtio_accel_device_realize(DeviceState *dev, Error **errp)
     }
 
     virtio_init(vdev, "virtio-accel", VIRTIO_ID_ACCEL, vaccel->config_size);
-    //vaccel->curr_queues = 1;
+    vaccel->curr_queue = 1;
     vaccel->vqs = g_malloc0(sizeof(VirtIOAccelQueue) * vaccel->max_queues);
     for (i = 0; i < vaccel->max_queues; i++) {
         vaccel->vqs[i].dataq =
                  virtio_add_queue(vdev, 1024, virtio_accel_dataq_callback);
         vaccel->vqs[i].dataq_bh =
                  qemu_bh_new(virtio_accel_dataq_bh_callback, &vaccel->vqs[i]);
-        vaccel->vqs[i].vaccel = vaccel;
+		vaccel->vqs[i].vaccel = vaccel;
     }
 
     if (!acceldev_backend_is_ready(vaccel->crypto)) {
@@ -474,7 +456,7 @@ static Property virtio_accel_properties[] = {
 static void virtio_accel_get_config(VirtIODevice *vdev, uint8_t *config)
 {
     VirtIOAccel *va = VIRTIO_ACCEL(vdev);
-    struct virtio_accel_config accel_cfg = {};
+    struct virtio_accel_conf cfg = {};
 
 	// TODO:
     /*
@@ -482,14 +464,16 @@ static void virtio_accel_get_config(VirtIODevice *vdev, uint8_t *config)
      * so we can use LE accessors directly.
      */
 	//
-    stl_le_p(&accel_cfg.status, va->status);
-    stl_le_p(&accel_cfg.max_dataqueues, va->max_queues);
-    stl_le_p(&accel_cfg.crypto_services, va->conf.crypto_services);
-    stl_le_p(&accel_cfg.max_cipher_key_len, va->conf.max_cipher_key_len);
-    stl_le_p(&accel_cfg.max_auth_key_len, va->conf.max_auth_key_len);
-    stq_le_p(&accel_cfg.max_size, va->conf.max_size);
+    stl_le_p(&cfg.status, va->status);
+    //stl_le_p(&cfg.max_dataqueues, va->max_queues);
+    stl_le_p(&cfg.services, va->conf.services);
+    stl_le_p(&cfg.u.crypto.max_cipher_key_len,
+			va->conf.u.crypto.max_cipher_key_len);
+    stl_le_p(&cfg.u.crypto.max_auth_key_len,
+			va->conf.u.crypto.max_auth_key_len);
+    stq_le_p(&cfg.max_size, va->conf.max_size);
 
-    memcpy(config, &accel_cfg, va->config_size);
+    memcpy(config, &cfg, va->config_size);
 }
 
 static void virtio_accel_class_init(ObjectClass *klass, void *data)
@@ -511,7 +495,7 @@ static void
 virtio_accel_check_crypto_is_used(Object *obj, const char *name,
                                       Object *val, Error **errp)
 {
-    if (acceldev_backend_is_used(ACCEL_BACKEND(val))) {
+    if (acceldev_backend_is_used(ACCELDEV_BACKEND(val))) {
         char *path = object_get_canonical_path_component(val);
         error_setg(errp,
             "can't use already used accel backend: %s", path);
@@ -529,10 +513,10 @@ static void virtio_accel_instance_init(Object *obj)
      * The default config_size is sizeof(struct virtio_crypto_config).
      * Can be overriden with virtio_crypto_set_config_size.
      */
-    vaccel->config_size = sizeof(struct virtio_accel_config);
+    vaccel->config_size = sizeof(struct virtio_accel_conf);
 
     object_property_add_link(obj, "crypto",
-                             TYPE_ACCEL_BACKEND,
+                             TYPE_ACCELDEV_BACKEND,
                              (Object **)&vaccel->conf.crypto,
                              virtio_accel_check_crypto_is_used,
                              OBJ_PROP_LINK_UNREF_ON_RELEASE, NULL);

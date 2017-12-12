@@ -1,21 +1,21 @@
-#ifndef ACCEL_H
-#define ACCEL_H
+#ifndef ACCELDEV_H
+#define ACCELDEV_H
 
 #include "qom/object.h"
 #include "qemu-common.h"
 
 
-#define TYPE_ACCEL_BACKEND "accel-backend"
+#define TYPE_ACCELDEV_BACKEND "acceldev-backend"
 
-#define ACCEL_BACKEND(obj) \
+#define ACCELDEV_BACKEND(obj) \
     OBJECT_CHECK(AccelDevBackend, \
-                 (obj), TYPE_ACCEL_BACKEND)
-#define ACCEL_BACKEND_GET_CLASS(obj) \
+                 (obj), TYPE_ACCELDEV_BACKEND)
+#define ACCELDEV_BACKEND_GET_CLASS(obj) \
     OBJECT_GET_CLASS(AccelDevBackendClass, \
-                 (obj), TYPE_ACCEL_BACKEND)
-#define ACCEL_BACKEND_CLASS(klass) \
+                 (obj), TYPE_ACCELDEV_BACKEND)
+#define ACCELDEV_BACKEND_CLASS(klass) \
     OBJECT_CLASS_CHECK(AccelDevBackendClass, \
-                (klass), TYPE_ACCEL_BACKEND)
+                (klass), TYPE_ACCELDEV_BACKEND)
 
 
 #define MAX_ACCEL_QUEUE_NUM  64
@@ -236,9 +236,9 @@ void acceldev_backend_cleanup(
  *
  * Returns: session id on success, or -1 on error
  */
-int64_t acceldev_backend_sym_create_session(
+int64_t acceldev_backend_create_session(
            AccelDevBackend *ab,
-           AccelDevBackendSymSessionInfo *sess_info,
+           AccelDevBackendSessionInfo *sess_info,
            uint32_t queue_index, Error **errp);
 
 /**
@@ -253,7 +253,7 @@ int64_t acceldev_backend_sym_create_session(
  *
  * Returns: 0 on success, or Negative on error
  */
-int acceldev_backend_sym_destroy_session(
+int acceldev_backend_destroy_session(
            AccelDevBackend *ab,
            uint64_t session_id,
            uint32_t queue_index, Error **errp);
@@ -271,9 +271,9 @@ int acceldev_backend_sym_destroy_session(
  * Returns: VIRTIO_CRYPTO_OK on success,
  *         or -VIRTIO_CRYPTO_* on error
  */
-int acceldev_backend_crypto_operation(
+int acceldev_backend_operation(
                  AccelDevBackend *ab,
-                 void *opaque,
+				 AccelDevBackendOpInfo *op_info,
                  uint32_t queue_index, Error **errp);
 
 /**
@@ -316,4 +316,4 @@ void acceldev_backend_set_ready(AccelDevBackend *ab, bool ready);
  */
 bool acceldev_backend_is_ready(AccelDevBackend *ab);
 
-#endif /* CRYPTODEV_H */
+#endif /* ACCELDEV_H */

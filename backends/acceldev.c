@@ -1,5 +1,5 @@
 #include "qemu/osdep.h"
-#include "sysemu/accel.h"
+#include "sysemu/acceldev.h"
 #include "hw/boards.h"
 #include "qapi/error.h"
 #include "qapi/visitor.h"
@@ -18,7 +18,7 @@ acceldev_backend_new_client(const char *model, const char *name)
 {
     AccelDevBackendClient *c;
 
-    c = g_malloc0(sizeof(CryptoDevBackendClient));
+    c = g_malloc0(sizeof(AccelDevBackendClient));
     c->model = g_strdup(model);
     if (name) {
         c->name = g_strdup(name);
@@ -54,7 +54,7 @@ int64_t acceldev_backend_create_session(
            uint32_t queue_index, Error **errp)
 {
     AccelDevBackendClass *abc =
-                      Accel_BACKEND_GET_CLASS(backend);
+                      ACCELDEV_BACKEND_GET_CLASS(ab);
 
     if (abc->create_session) {
         return abc->create_session(ab, sess_info, queue_index, errp);
@@ -179,7 +179,7 @@ static void acceldev_backend_instance_init(Object *obj)
 
 static void acceldev_backend_finalize(Object *obj)
 {
-    AccelDevBackend *ab = CRYPTODEV_BACKEND(obj);
+    AccelDevBackend *ab = ACCELDEV_BACKEND(obj);
 
     acceldev_backend_cleanup(ab, NULL);
 }
