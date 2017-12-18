@@ -135,12 +135,6 @@ static int acceldev_crypto_cipher_create_session(
     int index;
     AccelDevBackendCryptoSession *sess;
 
-    if (info->op != VIRTIO_ACCEL_C_OP_CIPHER_ENCRYPT ||
-			info->op != VIRTIO_ACCEL_C_OP_CIPHER_DECRYPT) {
-        error_setg(errp, "Unsupported optype :%u", info->op);
-        return -VIRTIO_ACCEL_ERR;
-    }
-
     index = acceldev_crypto_get_unused_session_index(crypto);
     if (index < 0) {
         error_setg(errp, "Total number of sessions created exceeds %u",
@@ -227,21 +221,13 @@ static int64_t acceldev_crypto_sym_create_session(
     int32_t sess_id = -VIRTIO_ACCEL_ERR;
     int ret;
 
-    switch (info->op) {
-    case VIRTIO_ACCEL_C_OP_CIPHER_CREATE_SESSION:
-        ret = acceldev_crypto_cipher_create_session(
-                           crypto, info, errp);
-        if (ret < 0) {
-            return ret;
-        } else {
-            sess_id = ret;
-        }
-        break;
-    default:
-        error_setg(errp, "Unsupported opcode :%" PRIu32 "",
-                   info->op);
-        return -VIRTIO_ACCEL_ERR;
-    }
+	ret = acceldev_crypto_cipher_create_session(
+					   crypto, info, errp);
+	if (ret < 0) {
+		return ret;
+	} else {
+		sess_id = ret;
+	}
 
     return sess_id;
 }
@@ -280,7 +266,7 @@ static int acceldev_crypto_sym_operation(
 
     if (info->session_id >= MAX_NUM_SESSIONS ||
               crypto->sessions[info->session_id] == NULL) {
-        error_setg(errp, "Cannot find a valid session id: %" PRIu64 "",
+        error_setg(errp, "Cannot find a valid session id: %" PRIu32 "",
                    info->session_id);
         return -VIRTIO_ACCEL_INVSESS;
     }
@@ -296,6 +282,11 @@ static int acceldev_crypto_sym_operation(
         }
     }
 	*/
+	if (info->u.crypto.src_len != info->u.crypto.dst_len) {
+		error_setg(errp, "src and dst length must be the same (%u vs %u)",
+					info->u.crypto.src_len, info->u.crypto.dst_len);
+		return -VIRTIO_ACCEL_ERR;
+	}
 
     if (info->op == VIRTIO_ACCEL_C_OP_CIPHER_ENCRYPT) {
         ret = qcrypto_cipher_encrypt(sess->cipher, info->u.crypto.src,
@@ -304,15 +295,19 @@ static int acceldev_crypto_sym_operation(
         if (ret < 0) {
             return -VIRTIO_ACCEL_ERR;
         }
-    } else {
+    } else if (info->op == VIRTIO_ACCEL_C_OP_CIPHER_DECRYPT) {
         ret = qcrypto_cipher_decrypt(sess->cipher, info->u.crypto.src,
                                      info->u.crypto.dst,
 									 info->u.crypto.src_len, errp);
         if (ret < 0) {
             return -VIRTIO_ACCEL_ERR;
         }
-    }
-    return VIRTIO_ACCEL_OK;
+    } else {
+        error_setg(errp, "Unsupported optype: %u", info->op);
+        return -VIRTIO_ACCEL_ERR;
+	}
+    
+	return VIRTIO_ACCEL_OK;
 }
 
 static void acceldev_crypto_cleanup(
