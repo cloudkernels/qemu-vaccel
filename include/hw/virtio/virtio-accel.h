@@ -9,7 +9,7 @@
 
 #define DEBUG_VIRTIO_ACCEL 0
 
-#define DPRINTF(fmt, ...) \
+#define VADPRINTF(fmt, ...) \
 do { \
     if (DEBUG_VIRTIO_ACCEL) { \
         fprintf(stderr, "virtio_accel: " fmt, ##__VA_ARGS__); \
@@ -47,8 +47,10 @@ typedef struct VirtIOAccelConf {
 struct VirtIOAccel;
 
 typedef struct VirtIOAccelReq {
-    VirtQueue *vq;
+	/* elem should always be first */
     VirtQueueElement elem;
+    
+	VirtQueue *vq;
     /* flags of operation, such as type of algorithm */
     uint32_t flags;
 
