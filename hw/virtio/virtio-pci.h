@@ -26,6 +26,7 @@
 #include "hw/virtio/virtio-input.h"
 #include "hw/virtio/virtio-gpu.h"
 #include "hw/virtio/virtio-crypto.h"
+#include "hw/virtio/virtio-accel.h"
 
 #ifdef CONFIG_VIRTFS
 #include "hw/9pfs/virtio-9p.h"
@@ -51,6 +52,7 @@ typedef struct VirtIOInputHostPCI VirtIOInputHostPCI;
 typedef struct VirtIOGPUPCI VirtIOGPUPCI;
 typedef struct VHostVSockPCI VHostVSockPCI;
 typedef struct VirtIOCryptoPCI VirtIOCryptoPCI;
+typedef struct VirtIOAccelPCI VirtIOAccelPCI;
 
 /* virtio-pci-bus */
 
@@ -381,6 +383,19 @@ struct VirtIOCryptoPCI {
     VirtIOPCIProxy parent_obj;
     VirtIOCrypto vdev;
 };
+
+/*
+ * virtio-accel-pci: This extends VirtioPCIProxy.
+ */
+#define TYPE_VIRTIO_ACCEL_PCI "virtio-accel-pci"
+#define VIRTIO_ACCEL_PCI(obj) \
+        OBJECT_CHECK(VirtIOAccelPCI, (obj), TYPE_VIRTIO_ACCEL_PCI)
+
+struct VirtIOAccelPCI {
+    VirtIOPCIProxy parent_obj;
+    VirtIOAccel vdev;
+};
+
 
 /* Virtio ABI version, if we increment this, we break the guest driver. */
 #define VIRTIO_PCI_ABI_VERSION          0
