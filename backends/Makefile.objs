@@ -15,3 +15,4 @@ common-obj-y += cryptodev-builtin.o
 
 common-obj-y += acceldev.o
 common-obj-y += acceldev-crypto.o
+common-obj-y += acceldev-generic.o

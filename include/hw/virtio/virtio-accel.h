@@ -33,6 +33,7 @@ typedef struct VirtIOAccelCryptoConf {
 
 typedef struct VirtIOAccelConf {
     AccelDevBackend *crypto;
+    AccelDevBackend *generic;
 
     /* Supported service mask */
     uint32_t services;
@@ -76,6 +77,7 @@ typedef struct VirtIOAccel {
     VirtIOAccelQueue *vqs;
     VirtIOAccelConf conf;
     AccelDevBackend *crypto;
+    AccelDevBackend *generic;
 
     uint32_t max_queues;
     uint32_t status;
