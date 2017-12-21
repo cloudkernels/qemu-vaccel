@@ -379,6 +379,7 @@ static void virtio_accel_init_config(VirtIODevice *vdev)
 {
     VirtIOAccel *vaccel = VIRTIO_ACCEL(vdev);
 
+	// FIXME
     vaccel->conf.services =
                      vaccel->conf.crypto->conf.services;
     vaccel->conf.u.crypto.max_cipher_key_len =
@@ -386,6 +387,7 @@ static void virtio_accel_init_config(VirtIODevice *vdev)
     vaccel->conf.u.crypto.max_auth_key_len =
                   vaccel->conf.crypto->conf.u.crypto.max_auth_key_len;
     vaccel->conf.max_size = vaccel->conf.crypto->conf.max_size;
+	//
 }
 
 static void virtio_accel_device_realize(DeviceState *dev, Error **errp)
@@ -399,6 +401,11 @@ static void virtio_accel_device_realize(DeviceState *dev, Error **errp)
         error_setg(errp, "'crypto' parameter expects a valid object");
         return;
     }
+    vaccel->generic = vaccel->conf.generic;
+    if (vaccel->generic == NULL) {
+        error_setg(errp, "'generic' parameter expects a valid object");
+        return;
+	}
 
     vaccel->max_queues = MAX(vaccel->crypto->conf.peers.queues, 1);
     if (vaccel->max_queues + 1 > VIRTIO_QUEUE_MAX) {
@@ -419,7 +426,8 @@ static void virtio_accel_device_realize(DeviceState *dev, Error **errp)
 		vaccel->vqs[i].vaccel = vaccel;
     }
 
-    if (!acceldev_backend_is_ready(vaccel->crypto)) {
+    if (!(acceldev_backend_is_ready(vaccel->crypto) &&
+				acceldev_backend_is_ready(vaccel->generic))) {
         vaccel->status &= ~VIRTIO_ACCEL_S_HW_READY;
     } else {
         vaccel->status |= VIRTIO_ACCEL_S_HW_READY;
@@ -427,6 +435,7 @@ static void virtio_accel_device_realize(DeviceState *dev, Error **errp)
 
     virtio_accel_init_config(vdev);
     acceldev_backend_set_used(vaccel->crypto, true);
+    acceldev_backend_set_used(vaccel->generic, true);
 }
 
 static void virtio_accel_device_unrealize(DeviceState *dev, Error **errp)
@@ -447,6 +456,7 @@ static void virtio_accel_device_unrealize(DeviceState *dev, Error **errp)
 
     virtio_cleanup(vdev);
     acceldev_backend_set_used(vaccel->crypto, false);
+    acceldev_backend_set_used(vaccel->generic, false);
 }
 
 static const VMStateDescription vmstate_virtio_accel = {
@@ -503,7 +513,7 @@ static void virtio_accel_class_init(ObjectClass *klass, void *data)
 }
 
 static void
-virtio_accel_check_crypto_is_used(Object *obj, const char *name,
+virtio_accel_check_backend_is_used(Object *obj, const char *name,
                                       Object *val, Error **errp)
 {
     if (acceldev_backend_is_used(ACCELDEV_BACKEND(val))) {
@@ -529,7 +539,12 @@ static void virtio_accel_instance_init(Object *obj)
     object_property_add_link(obj, "crypto",
                              TYPE_ACCELDEV_BACKEND,
                              (Object **)&vaccel->conf.crypto,
-                             virtio_accel_check_crypto_is_used,
+                             virtio_accel_check_backend_is_used,
+                             OBJ_PROP_LINK_UNREF_ON_RELEASE, NULL);
+    object_property_add_link(obj, "generic",
+                             TYPE_ACCELDEV_BACKEND,
+                             (Object **)&vaccel->conf.generic,
+                             virtio_accel_check_backend_is_used,
                              OBJ_PROP_LINK_UNREF_ON_RELEASE, NULL);
 }
 

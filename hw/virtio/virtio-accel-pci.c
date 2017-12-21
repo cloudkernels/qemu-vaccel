@@ -22,12 +22,19 @@ static void virtio_accel_pci_realize(VirtIOPCIProxy *vpci_dev, Error **errp)
         error_setg(errp, "'crypto' parameter expects a valid object");
         return;
     }
+    if (vaccel->vdev.conf.generic == NULL) {
+        error_setg(errp, "'generic' parameter expects a valid object");
+        return;
+    }
 
     qdev_set_parent_bus(vdev, BUS(&vpci_dev->bus));
     virtio_pci_force_virtio_1(vpci_dev);
     object_property_set_bool(OBJECT(vdev), true, "realized", errp);
     object_property_set_link(OBJECT(vaccel),
                  OBJECT(vaccel->vdev.conf.crypto), "crypto",
+                 NULL);
+    object_property_set_link(OBJECT(vaccel),
+                 OBJECT(vaccel->vdev.conf.generic), "generic",
                  NULL);
 }
 
@@ -51,6 +58,8 @@ static void virtio_accel_initfn(Object *obj)
                                 TYPE_VIRTIO_ACCEL);
     object_property_add_alias(obj, "crypto", OBJECT(&dev->vdev),
                               "crypto", &error_abort);
+    object_property_add_alias(obj, "generic", OBJECT(&dev->vdev),
+                              "generic", &error_abort);
 }
 
 static const TypeInfo virtio_accel_pci_info = {
