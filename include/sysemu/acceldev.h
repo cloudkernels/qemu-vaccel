@@ -64,10 +64,20 @@ typedef struct AccelDevBackendCryptoSessionInfo {
     uint8_t *auth_key;
 } AccelDevBackendCryptoSessionInfo;
 
+typedef struct AccelDevBackendGenOpInfo  {
+	uint32_t in_nr;
+	uint32_t out_nr;
+	uint32_t in_size;
+	uint32_t out_size;
+	uint8_t *in;
+	uint8_t *out;
+} AccelDevBackendGenOpInfo;
+
 typedef struct AccelDevBackendSessionInfo {
     uint32_t op;
 	union {
 		AccelDevBackendCryptoSessionInfo crypto;
+		AccelDevBackendGenOpInfo gen;
 	} u;
 } AccelDevBackendSessionInfo;
 
@@ -123,6 +133,7 @@ typedef struct AccelDevBackendOpInfo {
     uint32_t session_id;
 	union {
 		AccelDevBackendCryptoSymOpInfo crypto;
+		AccelDevBackendGenOpInfo gen;
 	} u;
 } AccelDevBackendOpInfo;
 

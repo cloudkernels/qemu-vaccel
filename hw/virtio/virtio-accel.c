@@ -185,6 +185,148 @@ virtio_accel_crypto_do_op(VirtIOAccelReq *req)
 }
 
 static int
+virtio_accel_gen_create_session(VirtIOAccelReq *req)
+{
+    VirtIOAccel *vaccel = req->vaccel;
+	struct virtio_accel_hdr *h = &req->hdr;
+    int queue_index = virtio_get_queue_index(req->vq);
+    AccelDevBackendSessionInfo info;
+    int64_t sess_id;
+	int ret = -VIRTIO_ACCEL_ERR;
+    Error *local_err = NULL;
+
+	info.op = h->op;
+    info.u.gen.in = h->u.gen_op.in;
+    info.u.gen.out = h->u.gen_op.out;
+    info.u.gen.in_nr = h->u.gen_op.in_nr;
+    info.u.gen.out_nr = h->u.gen_op.out_nr;
+    info.u.gen.in_size = h->u.gen_op.in_size;
+    info.u.gen.out_size = h->u.gen_op.out_size;
+	sess_id = acceldev_backend_create_session(
+                                     vaccel->generic,
+                                     &info, queue_index, &local_err);
+    if (sess_id >= 0) {
+		req->hdr.session_id = (uint32_t)sess_id;
+        VADPRINTF("generic create session_id=%" PRIu32 " successful\n",
+                req->hdr.session_id);
+		ret = VIRTIO_ACCEL_OK;
+    } else {
+        if (local_err) {
+            error_report_err(local_err);
+        }
+		ret = (int)sess_id;
+    }
+
+    return ret;
+}
+
+static int
+virtio_accel_gen_destroy_session(VirtIOAccelReq *req)
+{
+    VirtIOAccel *vaccel = req->vaccel;
+	struct virtio_accel_hdr *h = &req->hdr;
+    int queue_index = virtio_get_queue_index(req->vq);
+	int ret = -VIRTIO_ACCEL_ERR;
+    Error *local_err = NULL;
+
+	ret = acceldev_backend_destroy_session(
+                                     vaccel->generic,
+                                     h->session_id,
+									 queue_index, &local_err);
+    if (ret >= 0) {
+        VADPRINTF("generic destroy session_id=%" PRIu32 " successful\n",
+                req->hdr.session_id);
+    } else {
+        if (local_err) {
+            error_report_err(local_err);
+		}
+    }
+
+    return ret;
+}
+
+static int
+virtio_accel_gen_do_op(VirtIOAccelReq *req)
+{
+    VirtIOAccel *vaccel = req->vaccel;
+	struct virtio_accel_hdr *h = &req->hdr;
+    int queue_index = virtio_get_queue_index(req->vq);
+    AccelDevBackendOpInfo info;
+	int ret = -VIRTIO_ACCEL_ERR;
+    Error *local_err = NULL;
+
+	info.op = h->op;
+	info.session_id = h->session_id;
+    info.u.gen.in = h->u.gen_op.in;
+    info.u.gen.out = h->u.gen_op.out;
+    info.u.gen.in_nr = h->u.gen_op.in_nr;
+    info.u.gen.out_nr = h->u.gen_op.out_nr;
+    info.u.gen.in_size = h->u.gen_op.in_size;
+    info.u.gen.out_size = h->u.gen_op.out_size;
+	ret = acceldev_backend_operation(vaccel->generic, &info, queue_index,
+										&local_err);
+    
+	if (ret >= 0) {
+        VADPRINTF("generic op session_id=%" PRIu32 " successful\n",
+                info.session_id);
+    } else {
+        if (local_err) {
+            error_report_err(local_err);
+        }
+    }
+
+    return ret;
+}
+
+static void
+virtio_accel_handle_req_header_data(struct virtio_accel_hdr *h,
+									struct iovec *in_iov,
+									struct iovec *out_iov,
+									VirtIODevice *vdev)
+{
+	h->op = virtio_ldl_p(vdev, &h->op);
+    switch (h->op) {
+	case VIRTIO_ACCEL_C_OP_CIPHER_CREATE_SESSION:
+		h->u.crypto_sess.cipher = virtio_ldl_p(
+				vdev, &h->u.crypto_sess.cipher);
+		h->u.crypto_sess.keylen = virtio_ldl_p(
+				vdev, &h->u.crypto_sess.keylen);
+		break;
+	case VIRTIO_ACCEL_C_OP_CIPHER_DESTROY_SESSION:
+		h->session_id = virtio_ldl_p(vdev, &h->session_id);
+		break;
+    case VIRTIO_ACCEL_C_OP_CIPHER_ENCRYPT:
+    case VIRTIO_ACCEL_C_OP_CIPHER_DECRYPT:
+		h->session_id = virtio_ldl_p(vdev, &h->session_id);
+		h->u.crypto_op.src_len = virtio_ldl_p(
+				vdev, &h->u.crypto_op.src_len);
+		h->u.crypto_op.src = out_iov[0].iov_base;
+		h->u.crypto_op.dst_len = virtio_ldl_p(
+				vdev, &h->u.crypto_op.dst_len);
+		h->u.crypto_op.dst = in_iov[0].iov_base;
+		break;
+	case VIRTIO_ACCEL_G_OP_CREATE_SESSION:
+	case VIRTIO_ACCEL_G_OP_DO_OP:
+		h->u.gen_op.in_nr = virtio_ldl_p(
+				vdev, &h->u.gen_op.in_nr);
+		h->u.gen_op.out_nr = virtio_ldl_p(
+				vdev, &h->u.gen_op.out_nr);
+		h->u.gen_op.in_size = virtio_ldl_p(
+				vdev, &h->u.gen_op.in_size);
+		h->u.gen_op.out_size = virtio_ldl_p(
+				vdev, &h->u.gen_op.out_size);
+		h->u.gen_op.out = out_iov[0].iov_base;
+		h->u.gen_op.in = in_iov[0].iov_base;
+		break;
+	case VIRTIO_ACCEL_G_OP_DESTROY_SESSION:
+		h->session_id = virtio_ldl_p(vdev, &h->session_id);
+		break;
+    default:
+		break;
+	}
+}
+
+static int
 virtio_accel_handle_request(VirtIOAccelReq *req)
 {
     VirtIOAccel *vaccel = req->vaccel;
@@ -231,15 +373,10 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
 	req->out_iov = out_iov;
 	req->out_niov = out_niov;
 
-    req->hdr.op = virtio_ldl_p(vdev, &hdr.op);
+	virtio_accel_handle_req_header_data(&req->hdr, in_iov, out_iov, vdev);
 	VADPRINTF("handle request op=%u\n", req->hdr.op);
     switch (req->hdr.op) {
 	case VIRTIO_ACCEL_C_OP_CIPHER_CREATE_SESSION:
-		req->hdr.u.crypto_sess.cipher = virtio_ldl_p(
-				vdev, &hdr.u.crypto_sess.cipher);
-		req->hdr.u.crypto_sess.keylen = virtio_ldl_p(
-				vdev, &hdr.u.crypto_sess.keylen);
-		
 		ret = virtio_accel_crypto_create_session(req);
 		if (ret >= 0) {
 			virtio_stq_p(vdev, in_iov->iov_base, req->hdr.session_id);
@@ -252,8 +389,6 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
         virtio_accel_free_request(req);
 		break;
 	case VIRTIO_ACCEL_C_OP_CIPHER_DESTROY_SESSION:
-		req->hdr.session_id = virtio_ldl_p(vdev, &hdr.session_id);
-		
 		ret = virtio_accel_crypto_destroy_session(req);
 		/* Serious errors, need to reset virtio crypto device */
 		if (ret == -EFAULT)
@@ -264,18 +399,35 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
 		break;
     case VIRTIO_ACCEL_C_OP_CIPHER_ENCRYPT:
     case VIRTIO_ACCEL_C_OP_CIPHER_DECRYPT:
-		req->hdr.session_id = virtio_ldl_p(vdev, &hdr.session_id);
-		req->hdr.u.crypto_op.src_len = virtio_ldl_p(
-				vdev, &hdr.u.crypto_op.src_len);
-		req->hdr.u.crypto_op.src = out_iov[0].iov_base;
-		req->hdr.u.crypto_op.dst_len = virtio_ldl_p(
-				vdev, &hdr.u.crypto_op.dst_len);
-		req->hdr.u.crypto_op.dst = in_iov[0].iov_base;
-
 		ret = virtio_accel_crypto_do_op(req);
 		/* Serious errors, need to reset virtio crypto device */
  		if (ret == -EFAULT)
 			return -1;
+        virtio_accel_complete_request(req, ret);
+        virtio_accel_free_request(req);
+		break;
+	case VIRTIO_ACCEL_G_OP_CREATE_SESSION:
+	case VIRTIO_ACCEL_G_OP_DO_OP:
+		if (req->hdr.op == VIRTIO_ACCEL_G_OP_CREATE_SESSION) {
+			ret = virtio_accel_gen_create_session(req);
+			if (ret >= 0)
+				virtio_stq_p(vdev, in_iov->iov_base, req->hdr.session_id);
+		} else {
+			ret = virtio_accel_gen_do_op(req);
+		}
+		/* Serious errors, need to reset virtio crypto device */
+		if (ret == -EFAULT)
+			return -1;
+        
+		virtio_accel_complete_request(req, ret);
+        virtio_accel_free_request(req);
+		break;
+	case VIRTIO_ACCEL_G_OP_DESTROY_SESSION:
+		ret = virtio_accel_gen_destroy_session(req);
+		/* Serious errors, need to reset virtio crypto device */
+		if (ret == -EFAULT)
+			return -1;
+
         virtio_accel_complete_request(req, ret);
         virtio_accel_free_request(req);
 		break;
