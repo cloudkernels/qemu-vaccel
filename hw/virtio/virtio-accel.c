@@ -279,11 +279,13 @@ virtio_accel_gen_do_op(VirtIOAccelReq *req)
 }
 
 static void
-virtio_accel_handle_req_header_data(struct virtio_accel_hdr *h,
-									struct iovec *in_iov,
-									struct iovec *out_iov,
-									VirtIODevice *vdev)
+virtio_accel_handle_req_header_data(VirtIOAccelReq *req)
 {
+    VirtIOAccel *vaccel = req->vaccel;
+    VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
+	struct virtio_accel_hdr *h = &req->hdr;
+	struct iovec *in_iov = req->in_iov, *out_iov = req->out_iov;
+
 	h->op = virtio_ldl_p(vdev, &h->op);
     switch (h->op) {
 	case VIRTIO_ACCEL_C_OP_CIPHER_CREATE_SESSION:
@@ -315,8 +317,12 @@ virtio_accel_handle_req_header_data(struct virtio_accel_hdr *h,
 				vdev, &h->u.gen_op.in_size);
 		h->u.gen_op.out_size = virtio_ldl_p(
 				vdev, &h->u.gen_op.out_size);
-		h->u.gen_op.out = out_iov[0].iov_base;
-		h->u.gen_op.in = in_iov[0].iov_base;
+		if (h->u.gen_op.out_size > 0)
+			h->u.gen_op.out = out_iov[0].iov_base;
+		if (h->u.gen_op.in_size > 0) {
+			h->u.gen_op.in = in_iov[0].iov_base;
+    		iov_discard_front(&in_iov, &req->in_niov, in_iov[0].iov_len);
+		}
 		break;
 	case VIRTIO_ACCEL_G_OP_DESTROY_SESSION:
 		h->session_id = virtio_ldl_p(vdev, &h->session_id);
@@ -373,7 +379,7 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
 	req->out_iov = out_iov;
 	req->out_niov = out_niov;
 
-	virtio_accel_handle_req_header_data(&req->hdr, in_iov, out_iov, vdev);
+	virtio_accel_handle_req_header_data(req);
 	VADPRINTF("handle request op=%u\n", req->hdr.op);
     switch (req->hdr.op) {
 	case VIRTIO_ACCEL_C_OP_CIPHER_CREATE_SESSION:
