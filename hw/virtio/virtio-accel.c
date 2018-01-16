@@ -338,7 +338,6 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
     VirtIOAccel *vaccel = req->vaccel;
     VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
     VirtQueueElement *elem = &req->elem;
-    struct virtio_accel_hdr hdr;
     int ret;
     struct iovec *in_iov, *out_iov;
     unsigned int in_niov, out_niov;
@@ -355,12 +354,12 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
     in_niov = elem->in_num;
 
 	VADPRINTF("handle request in_iovs=%u, out_iovs=%u\n", in_niov, out_niov);
-    if (unlikely(iov_to_buf(out_iov, out_niov, 0, &hdr,
-                            sizeof(hdr)) != sizeof(hdr))) {
+    if (unlikely(iov_to_buf(out_iov, out_niov, 0, &req->hdr,
+                            sizeof(req->hdr)) != sizeof(req->hdr))) {
         virtio_error(vdev, "virtio-accel request hdr too short");
         return -1;
     }
-    iov_discard_front(&out_iov, &out_niov, sizeof(hdr));
+    iov_discard_front(&out_iov, &out_niov, sizeof(req->hdr));
 
     if (in_iov[in_niov - 1].iov_len !=
             sizeof(status)) {
