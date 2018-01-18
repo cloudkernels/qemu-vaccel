@@ -67,8 +67,6 @@ typedef struct AccelDevBackendCryptoSessionInfo {
 typedef struct AccelDevBackendGenOpInfo  {
 	uint32_t in_nr;
 	uint32_t out_nr;
-	uint32_t in_size;
-	uint32_t out_size;
 	uint8_t *in;
 	uint8_t *out;
 } AccelDevBackendGenOpInfo;

@@ -36,15 +36,17 @@ struct virtio_accel_crypto_op {
 	unsigned char *iv;
 	unsigned char padding;
 };
+struct virtio_accel_gen_op_arg {
+    uint32_t len;
+    unsigned char *buf;
+    unsigned char padding[3];
+};
 
 struct virtio_accel_gen_op {
-	uint32_t in_nr;
-	uint32_t out_nr;
-	uint32_t in_size;
-	uint32_t out_size;
-	unsigned char *in;
-	unsigned char *out;
-	unsigned char padding[6];
+    uint32_t in_nr;
+    uint32_t out_nr;
+    struct virtio_accel_gen_op_arg *in;
+    struct virtio_accel_gen_op_arg *out;
 };
 
 struct virtio_accel_hdr {
