@@ -7,7 +7,7 @@
 #include "sysemu/acceldev.h"
 
 
-#define DEBUG_VIRTIO_ACCEL 0
+#define DEBUG_VIRTIO_ACCEL 1
 
 #define VADPRINTF(fmt, ...) \
 do { \

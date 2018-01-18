@@ -26,6 +26,13 @@ static void virtio_accel_init_request(VirtIOAccelReq *req,
 
 static void virtio_accel_free_request(VirtIOAccelReq *req)
 {
+	if (req->hdr.op == VIRTIO_ACCEL_G_OP_CREATE_SESSION ||
+			req->hdr.op == VIRTIO_ACCEL_G_OP_DO_OP) {
+		if (req->hdr.u.gen_op.in)
+			g_free(req->hdr.u.gen_op.in);
+		if (req->hdr.u.gen_op.out)
+			g_free(req->hdr.u.gen_op.out);
+	}
     if (req)
         g_free(req);
 }
@@ -196,12 +203,10 @@ virtio_accel_gen_create_session(VirtIOAccelReq *req)
     Error *local_err = NULL;
 
 	info.op = h->op;
-    info.u.gen.in = h->u.gen_op.in;
-    info.u.gen.out = h->u.gen_op.out;
+    info.u.gen.in = (unsigned char *) h->u.gen_op.in;
+    info.u.gen.out = (unsigned char *) h->u.gen_op.out;
     info.u.gen.in_nr = h->u.gen_op.in_nr;
     info.u.gen.out_nr = h->u.gen_op.out_nr;
-    info.u.gen.in_size = h->u.gen_op.in_size;
-    info.u.gen.out_size = h->u.gen_op.out_size;
 	sess_id = acceldev_backend_create_session(
                                      vaccel->generic,
                                      &info, queue_index, &local_err);
@@ -257,12 +262,10 @@ virtio_accel_gen_do_op(VirtIOAccelReq *req)
 
 	info.op = h->op;
 	info.session_id = h->session_id;
-    info.u.gen.in = h->u.gen_op.in;
-    info.u.gen.out = h->u.gen_op.out;
+    info.u.gen.in = (unsigned char *) h->u.gen_op.in;
+    info.u.gen.out = (unsigned char *) h->u.gen_op.out;
     info.u.gen.in_nr = h->u.gen_op.in_nr;
     info.u.gen.out_nr = h->u.gen_op.out_nr;
-    info.u.gen.in_size = h->u.gen_op.in_size;
-    info.u.gen.out_size = h->u.gen_op.out_size;
 	ret = acceldev_backend_operation(vaccel->generic, &info, queue_index,
 										&local_err);
     
@@ -285,6 +288,7 @@ virtio_accel_handle_req_header_data(VirtIOAccelReq *req)
     VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
 	struct virtio_accel_hdr *h = &req->hdr;
 	struct iovec *in_iov = req->in_iov, *out_iov = req->out_iov;
+	int i, in_iov_len = 0;
 
 	h->op = virtio_ldl_p(vdev, &h->op);
     switch (h->op) {
@@ -313,15 +317,23 @@ virtio_accel_handle_req_header_data(VirtIOAccelReq *req)
 				vdev, &h->u.gen_op.in_nr);
 		h->u.gen_op.out_nr = virtio_ldl_p(
 				vdev, &h->u.gen_op.out_nr);
-		h->u.gen_op.in_size = virtio_ldl_p(
-				vdev, &h->u.gen_op.in_size);
-		h->u.gen_op.out_size = virtio_ldl_p(
-				vdev, &h->u.gen_op.out_size);
-		if (h->u.gen_op.out_size > 0)
-			h->u.gen_op.out = out_iov[0].iov_base;
-		if (h->u.gen_op.in_size > 0) {
-			h->u.gen_op.in = in_iov[0].iov_base;
-    		iov_discard_front(&in_iov, &req->in_niov, in_iov[0].iov_len);
+		if (h->u.gen_op.out_nr > 0) {
+			h->u.gen_op.out = g_new0(struct virtio_accel_gen_op_arg,
+									h->u.gen_op.out_nr);
+			for (i = 0; i < h->u.gen_op.out_nr; i++) {
+				h->u.gen_op.out[i].buf = out_iov[i].iov_base;
+				h->u.gen_op.out[i].len = out_iov[i].iov_len;
+			}
+		}
+		if (h->u.gen_op.in_nr > 0) {
+			h->u.gen_op.in = g_new0(struct virtio_accel_gen_op_arg,
+									h->u.gen_op.in_nr);
+			for (i = 0; i < h->u.gen_op.in_nr; i++) {
+				h->u.gen_op.in[i].buf = in_iov[i].iov_base;
+				h->u.gen_op.in[i].len = in_iov[i].iov_len;
+				in_iov_len += in_iov[i].iov_len;
+			}
+    		iov_discard_front(&in_iov, &req->in_niov, in_iov_len);
 		}
 		break;
 	case VIRTIO_ACCEL_G_OP_DESTROY_SESSION:
