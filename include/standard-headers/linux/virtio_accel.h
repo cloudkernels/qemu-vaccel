@@ -39,6 +39,7 @@ struct virtio_accel_crypto_op {
 struct virtio_accel_gen_op_arg {
     uint32_t len;
     unsigned char *buf;
+    unsigned char *usr_buf;
     unsigned char padding[3];
 };
 
