@@ -3088,6 +3088,15 @@ then
 fi
 
 ##########################################
+# libvaccel_runtime
+
+vaccel_runtime=yes
+if test "$vaccel_runtime" = "yes" ; then
+  libs_tools="-lvaccel_runtime -lOpenCL $libs_tools"
+  libs_softmmu="-lvaccel_runtime -lOpenCL $libs_softmmu"
+fi
+
+##########################################
 # libtasn1 - only for the TLS creds/session test suite
 
 tasn1=yes
@@ -6606,6 +6615,7 @@ echo "VTE support       $vte $(echo_version $vte $vteversion)"
 echo "TLS priority      $tls_priority"
 echo "GNUTLS support    $gnutls"
 echo "libgcrypt         $gcrypt"
+echo "vaccel_runtime    $vaccel_runtime"
 if test "$gcrypt" = "yes"
 then
    echo "  hmac            $gcrypt_hmac"
@@ -7087,6 +7097,9 @@ fi
 echo "CONFIG_TLS_PRIORITY=\"$tls_priority\"" >> $config_host_mak
 if test "$gnutls" = "yes" ; then
   echo "CONFIG_GNUTLS=y" >> $config_host_mak
+fi
+if test "$vaccel_runtime" = "yes" ; then
+  echo "CONFIG_VACCEL_RUNTIME=y" >> $config_host_mak
 fi
 if test "$gcrypt" = "yes" ; then
   echo "CONFIG_GCRYPT=y" >> $config_host_mak
