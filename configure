@@ -2509,6 +2509,15 @@ then
 fi
 
 ##########################################
+# libvaccel_runtime
+
+vaccel_runtime=yes
+if test "$vaccel_runtime" = "yes" ; then
+  libs_tools="-lvaccel_runtime -lOpenCL $libs_tools"
+  libs_softmmu="-lvaccel_runtime -lOpenCL $libs_softmmu"
+fi
+
+##########################################
 # libtasn1 - only for the TLS creds/session test suite
 
 tasn1=yes
@@ -5061,6 +5070,7 @@ echo "TLS priority      $tls_priority"
 echo "GNUTLS support    $gnutls"
 echo "GNUTLS rnd        $gnutls_rnd"
 echo "libgcrypt         $gcrypt"
+echo "vaccel_runtime    $vaccel_runtime"
 echo "libgcrypt kdf     $gcrypt_kdf"
 echo "nettle            $nettle $(echo_version $nettle $nettle_version)"
 echo "nettle kdf        $nettle_kdf"
@@ -5456,6 +5466,9 @@ if test "$gnutls" = "yes" ; then
 fi
 if test "$gnutls_rnd" = "yes" ; then
   echo "CONFIG_GNUTLS_RND=y" >> $config_host_mak
+fi
+if test "$vaccel_runtime" = "yes" ; then
+  echo "CONFIG_VACCEL_RUNTIME=y" >> $config_host_mak
 fi
 if test "$gcrypt" = "yes" ; then
   echo "CONFIG_GCRYPT=y" >> $config_host_mak

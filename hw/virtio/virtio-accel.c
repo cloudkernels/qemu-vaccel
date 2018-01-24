@@ -203,8 +203,8 @@ virtio_accel_gen_create_session(VirtIOAccelReq *req)
     Error *local_err = NULL;
 
 	info.op = h->op;
-    info.u.gen.in = (unsigned char *) h->u.gen_op.in;
-    info.u.gen.out = (unsigned char *) h->u.gen_op.out;
+    info.u.gen.in = (AccelDevBackendGenOpArg *)h->u.gen_op.in;
+    info.u.gen.out = (AccelDevBackendGenOpArg *)h->u.gen_op.out;
     info.u.gen.in_nr = h->u.gen_op.in_nr;
     info.u.gen.out_nr = h->u.gen_op.out_nr;
 	sess_id = acceldev_backend_create_session(
@@ -262,8 +262,8 @@ virtio_accel_gen_do_op(VirtIOAccelReq *req)
 
 	info.op = h->op;
 	info.session_id = h->session_id;
-    info.u.gen.in = (unsigned char *) h->u.gen_op.in;
-    info.u.gen.out = (unsigned char *) h->u.gen_op.out;
+    info.u.gen.in = (AccelDevBackendGenOpArg *)h->u.gen_op.in;
+    info.u.gen.out = (AccelDevBackendGenOpArg *)h->u.gen_op.out;
     info.u.gen.in_nr = h->u.gen_op.in_nr;
     info.u.gen.out_nr = h->u.gen_op.out_nr;
 	ret = acceldev_backend_operation(vaccel->generic, &info, queue_index,
@@ -289,6 +289,7 @@ virtio_accel_handle_req_header_data(VirtIOAccelReq *req)
 	struct virtio_accel_hdr *h = &req->hdr;
 	struct iovec *in_iov = req->in_iov, *out_iov = req->out_iov;
 	int i, in_iov_len = 0;
+	AccelDevBackendGenOpArg *gop_arg;
 
 	h->op = virtio_ldl_p(vdev, &h->op);
     switch (h->op) {
@@ -318,21 +319,22 @@ virtio_accel_handle_req_header_data(VirtIOAccelReq *req)
 		h->u.gen_op.out_nr = virtio_ldl_p(
 				vdev, &h->u.gen_op.out_nr);
 		if (h->u.gen_op.out_nr > 0) {
-			h->u.gen_op.out = g_new0(struct virtio_accel_gen_op_arg,
+			gop_arg = g_new0(AccelDevBackendGenOpArg,
 									h->u.gen_op.out_nr);
 			for (i = 0; i < h->u.gen_op.out_nr; i++) {
-				h->u.gen_op.out[i].buf = out_iov[i].iov_base;
-				h->u.gen_op.out[i].len = out_iov[i].iov_len;
+				gop_arg[i].buf = out_iov[i].iov_base;
+				gop_arg[i].len = out_iov[i].iov_len;
 			}
+			h->u.gen_op.out = (struct virtio_accel_gen_op_arg *)gop_arg;
 		}
 		if (h->u.gen_op.in_nr > 0) {
-			h->u.gen_op.in = g_new0(struct virtio_accel_gen_op_arg,
-									h->u.gen_op.in_nr);
+			gop_arg = g_new0(AccelDevBackendGenOpArg, h->u.gen_op.in_nr);
 			for (i = 0; i < h->u.gen_op.in_nr; i++) {
-				h->u.gen_op.in[i].buf = in_iov[i].iov_base;
-				h->u.gen_op.in[i].len = in_iov[i].iov_len;
+				gop_arg[i].buf = in_iov[i].iov_base;
+				gop_arg[i].len = in_iov[i].iov_len;
 				in_iov_len += in_iov[i].iov_len;
 			}
+			h->u.gen_op.in = (struct virtio_accel_gen_op_arg *)gop_arg;
     		iov_discard_front(&in_iov, &req->in_niov, in_iov_len);
 		}
 		break;

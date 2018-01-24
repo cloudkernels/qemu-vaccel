@@ -64,11 +64,16 @@ typedef struct AccelDevBackendCryptoSessionInfo {
     uint8_t *auth_key;
 } AccelDevBackendCryptoSessionInfo;
 
-typedef struct AccelDevBackendGenOpInfo  {
+typedef struct AccelDevBackendGenOpArg {
+	uint8_t *buf;
+	uint32_t len;
+} AccelDevBackendGenOpArg;
+
+typedef struct AccelDevBackendGenOpInfo {
 	uint32_t in_nr;
 	uint32_t out_nr;
-	uint8_t *in;
-	uint8_t *out;
+	AccelDevBackendGenOpArg *in;
+	AccelDevBackendGenOpArg *out;
 } AccelDevBackendGenOpInfo;
 
 typedef struct AccelDevBackendSessionInfo {
