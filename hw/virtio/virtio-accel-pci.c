@@ -56,10 +56,6 @@ static void virtio_accel_initfn(Object *obj)
 
     virtio_instance_init_common(obj, &dev->vdev, sizeof(dev->vdev),
                                 TYPE_VIRTIO_ACCEL);
-    object_property_add_alias(obj, "crypto", OBJECT(&dev->vdev),
-                              "crypto", &error_abort);
-    object_property_add_alias(obj, "generic", OBJECT(&dev->vdev),
-                              "generic", &error_abort);
 }
 
 static const TypeInfo virtio_accel_pci_info = {
