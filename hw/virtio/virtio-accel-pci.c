@@ -8,6 +8,20 @@
 #include "qapi/error.h"
 #include "qemu/module.h"
 
+typedef struct VirtIOAccelPCI VirtIOAccelPCI;
+
+/*
+ * virtio-accel-pci: This extends VirtioPCIProxy.
+ */
+#define TYPE_VIRTIO_ACCEL_PCI "virtio-accel-pci"
+#define VIRTIO_ACCEL_PCI(obj) \
+        OBJECT_CHECK(VirtIOAccelPCI, (obj), TYPE_VIRTIO_ACCEL_PCI)
+
+struct VirtIOAccelPCI {
+    VirtIOPCIProxy parent_obj;
+    VirtIOAccel vdev;
+};
+
 static Property virtio_accel_pci_properties[] = {
     DEFINE_PROP_BIT("ioeventfd", VirtIOPCIProxy, flags,
                     VIRTIO_PCI_FLAG_USE_IOEVENTFD_BIT, true),
