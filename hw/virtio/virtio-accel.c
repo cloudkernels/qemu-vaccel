@@ -695,7 +695,7 @@ static void virtio_accel_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
     VirtioDeviceClass *vdc = VIRTIO_DEVICE_CLASS(klass);
 
-    dc->props = virtio_accel_properties;
+    device_class_set_props(dc, virtio_accel_properties);
     dc->vmsd = &vmstate_virtio_accel;
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
     vdc->realize = virtio_accel_device_realize;
