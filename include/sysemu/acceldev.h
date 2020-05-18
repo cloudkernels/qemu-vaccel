@@ -1,9 +1,8 @@
 #ifndef ACCELDEV_H
 #define ACCELDEV_H
 
+#include "qemu/queue.h"
 #include "qom/object.h"
-#include "qemu-common.h"
-
 
 #define TYPE_ACCELDEV_BACKEND "acceldev-backend"
 
