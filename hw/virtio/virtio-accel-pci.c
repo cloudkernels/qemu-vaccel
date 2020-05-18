@@ -1,10 +1,12 @@
 #include "qemu/osdep.h"
 #include "hw/pci/pci.h"
+#include "hw/qdev-properties.h"
 #include "hw/virtio/virtio.h"
 #include "hw/virtio/virtio-bus.h"
 #include "hw/virtio/virtio-pci.h"
 #include "hw/virtio/virtio-accel.h"
 #include "qapi/error.h"
+#include "qemu/module.h"
 
 static Property virtio_accel_pci_properties[] = {
     DEFINE_PROP_BIT("ioeventfd", VirtIOPCIProxy, flags,
@@ -58,9 +60,8 @@ static void virtio_accel_initfn(Object *obj)
                                 TYPE_VIRTIO_ACCEL);
 }
 
-static const TypeInfo virtio_accel_pci_info = {
-    .name          = TYPE_VIRTIO_ACCEL_PCI,
-    .parent        = TYPE_VIRTIO_PCI,
+static const VirtioPCIDeviceTypeInfo virtio_accel_pci_info = {
+    .generic_name  = TYPE_VIRTIO_ACCEL_PCI,
     .instance_size = sizeof(VirtIOAccelPCI),
     .instance_init = virtio_accel_initfn,
     .class_init    = virtio_accel_pci_class_init,
@@ -68,6 +69,6 @@ static const TypeInfo virtio_accel_pci_info = {
 
 static void virtio_accel_pci_register_types(void)
 {
-    type_register_static(&virtio_accel_pci_info);
+    virtio_pci_types_register(&virtio_accel_pci_info);
 }
 type_init(virtio_accel_pci_register_types)
