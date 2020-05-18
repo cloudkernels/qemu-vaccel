@@ -17,10 +17,8 @@
 
 #include "hw/pci/msi.h"
 #include "hw/virtio/virtio-bus.h"
-#include "hw/virtio/virtio-accel.h"
 
 typedef struct VirtIOPCIProxy VirtIOPCIProxy;
-typedef struct VirtIOAccelPCI VirtIOAccelPCI;
 
 /* virtio-pci-bus */
 
@@ -185,19 +183,6 @@ static inline void virtio_pci_disable_modern(VirtIOPCIProxy *proxy)
  * virtio-input-pci: This extends VirtioPCIProxy.
  */
 #define TYPE_VIRTIO_INPUT_PCI "virtio-input-pci"
-
-/*
- * virtio-accel-pci: This extends VirtioPCIProxy.
- */
-#define TYPE_VIRTIO_ACCEL_PCI "virtio-accel-pci"
-#define VIRTIO_ACCEL_PCI(obj) \
-        OBJECT_CHECK(VirtIOAccelPCI, (obj), TYPE_VIRTIO_ACCEL_PCI)
-
-struct VirtIOAccelPCI {
-    VirtIOPCIProxy parent_obj;
-    VirtIOAccel vdev;
-};
-
 
 /* Virtio ABI version, if we increment this, we break the guest driver. */
 #define VIRTIO_PCI_ABI_VERSION          0
