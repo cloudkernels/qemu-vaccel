@@ -3092,8 +3092,8 @@ fi
 
 vaccel_runtime=yes
 if test "$vaccel_runtime" = "yes" ; then
-  libs_tools="-lvaccel_runtime -lOpenCL $libs_tools"
-  libs_softmmu="-lvaccel_runtime -lOpenCL $libs_softmmu"
+  libs_tools="-lvaccel_runtime $libs_tools"
+  libs_softmmu="-lvaccel_runtime $libs_softmmu"
 fi
 
 ##########################################
