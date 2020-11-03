@@ -159,7 +159,7 @@ bool acceldev_backend_is_ready(AccelDevBackend *ab)
 }
 
 static bool
-acceldev_backend_can_be_deleted(UserCreatable *uc, Error **errp)
+acceldev_backend_can_be_deleted(UserCreatable *uc)
 {
     return !acceldev_backend_is_used(ACCELDEV_BACKEND(uc));
 }
