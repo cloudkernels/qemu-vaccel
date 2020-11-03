@@ -105,21 +105,17 @@ acceldev_backend_set_queues(Object *obj, Visitor *v, const char *name,
                              void *opaque, Error **errp)
 {
     AccelDevBackend *ab = ACCELDEV_BACKEND(obj);
-    Error *local_err = NULL;
     uint32_t value;
 
-    visit_type_uint32(v, name, &value, &local_err);
-    if (local_err)
-        goto out;
+    if (!visit_type_uint32(v, name, &value, errp))
+			return;
 
     if (!value) {
-        error_setg(&local_err, "Property '%s.%s' doesn't take value '%"
+        error_setg(errp, "Property '%s.%s' doesn't take value '%"
                    PRIu32 "'", object_get_typename(obj), name, value);
-        goto out;
+        return;
     }
     ab->conf.peers.queues = value;
-out:
-    error_propagate(errp, local_err);
 }
 
 static void
@@ -127,13 +123,9 @@ acceldev_backend_complete(UserCreatable *uc, Error **errp)
 {
     AccelDevBackend *ab = ACCELDEV_BACKEND(uc);
     AccelDevBackendClass *abc = ACCELDEV_BACKEND_GET_CLASS(uc);
-    Error *local_err = NULL;
 
-    if (abc->init) {
-        abc->init(ab, &local_err);
-        if (local_err)
-    		error_propagate(errp, local_err);
-    }
+    if (abc->init)
+        abc->init(ab, errp);
 
     return;
 }
@@ -159,19 +151,15 @@ bool acceldev_backend_is_ready(AccelDevBackend *ab)
 }
 
 static bool
-acceldev_backend_can_be_deleted(UserCreatable *uc, Error **errp)
+acceldev_backend_can_be_deleted(UserCreatable *uc)
 {
     return !acceldev_backend_is_used(ACCELDEV_BACKEND(uc));
 }
 
 static void acceldev_backend_instance_init(Object *obj)
 {
-    object_property_add(obj, "queues", "int",
-                          acceldev_backend_get_queues,
-                          acceldev_backend_set_queues,
-                          NULL, NULL, NULL);
     /* Initialize devices' queues property to 1 */
-    object_property_set_int(obj, 1, "queues", NULL);
+    object_property_set_int(obj, "queues", 1, NULL);
 }
 
 static void acceldev_backend_finalize(Object *obj)
@@ -190,6 +178,10 @@ acceldev_backend_class_init(ObjectClass *oc, void *data)
     ucc->can_be_deleted = acceldev_backend_can_be_deleted;
 
     QTAILQ_INIT(&accel_clients);
+    object_class_property_add(oc, "queues", "uint32",
+                          acceldev_backend_get_queues,
+                          acceldev_backend_set_queues,
+                          NULL, NULL);
 }
 
 static const TypeInfo acceldev_backend_info = {

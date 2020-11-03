@@ -6,15 +6,8 @@
 
 #define TYPE_ACCELDEV_BACKEND "acceldev-backend"
 
-#define ACCELDEV_BACKEND(obj) \
-    OBJECT_CHECK(AccelDevBackend, \
-                 (obj), TYPE_ACCELDEV_BACKEND)
-#define ACCELDEV_BACKEND_GET_CLASS(obj) \
-    OBJECT_GET_CLASS(AccelDevBackendClass, \
-                 (obj), TYPE_ACCELDEV_BACKEND)
-#define ACCELDEV_BACKEND_CLASS(klass) \
-    OBJECT_CLASS_CHECK(AccelDevBackendClass, \
-                (klass), TYPE_ACCELDEV_BACKEND)
+OBJECT_DECLARE_TYPE(AccelDevBackend, AccelDevBackendClass,
+                    ACCELDEV_BACKEND)
 
 
 #define MAX_ACCEL_QUEUE_NUM  64
