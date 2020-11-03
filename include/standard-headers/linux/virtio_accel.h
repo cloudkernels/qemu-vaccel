@@ -40,7 +40,9 @@ struct virtio_accel_gen_op_arg {
     uint32_t len;
     unsigned char *buf;
     unsigned char *usr_buf;
-    unsigned char padding[3];
+    unsigned char *usr_pages;
+    uint32_t usr_npages;
+    unsigned char padding[5];
 };
 
 struct virtio_accel_gen_op {

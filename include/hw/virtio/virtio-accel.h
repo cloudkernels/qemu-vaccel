@@ -40,35 +40,36 @@ typedef struct VirtIOAccelConf {
     /* Maximum size of each crypto request's content */
     uint64_t max_size;
 
-	union {
-		struct VirtIOAccelCryptoConf crypto;
-	} u;
+    union {
+        struct VirtIOAccelCryptoConf crypto;
+    } u;
 } VirtIOAccelConf;
 
 struct VirtIOAccel;
 
 typedef struct VirtIOAccelReq {
-	/* elem should always be first */
+    /* elem should always be first */
     VirtQueueElement elem;
     
-	VirtQueue *vq;
+    VirtQueue *vq;
     /* flags of operation, such as type of algorithm */
     uint32_t flags;
 
-	struct virtio_accel_hdr hdr;
-	struct VirtIOAccel *vaccel;
-	struct iovec *in_iov;
-	struct iovec *out_iov;
-	unsigned int in_niov;
-	unsigned int out_niov;
+    struct virtio_accel_hdr hdr;
+    struct VirtIOAccel *vaccel;
+    struct iovec *in_iov;
+    struct iovec *out_iov;
+    unsigned int in_niov;
+    unsigned int out_niov;
     size_t in_iov_len;
-	uint32_t *in_status;
+    AccelDevBackendOpInfo info;
+    uint32_t *in_status;
 } VirtIOAccelReq;
 
 typedef struct VirtIOAccelQueue {
     VirtQueue *dataq;
     QEMUBH *dataq_bh;
-	struct VirtIOAccel *vaccel;
+    struct VirtIOAccel *vaccel;
 } VirtIOAccelQueue;
 
 typedef struct VirtIOAccel {
