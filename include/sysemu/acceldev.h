@@ -22,114 +22,27 @@ enum AccelDevBackendCryptoAlgType {
     ACCELDEV_BACKEND_CRYPTO_ALG__MAX,
 };
 
-/**
- * AccelDevBackendSymSessionInfo:
- *
- * @op_code: operation code (refer to virtio_crypto.h)
- * @cipher_alg: algorithm type of CIPHER
- * @key_len: byte length of cipher key
- * @hash_alg: algorithm type of HASH/MAC
- * @hash_result_len: byte length of HASH operation result
- * @auth_key_len: byte length of authenticated key
- * @add_len: byte length of additional authenticated data
- * @op_type: operation type (refer to virtio_crypto.h)
- * @direction: encryption or direction for CIPHER
- * @hash_mode: HASH mode for HASH operation (refer to virtio_crypto.h)
- * @alg_chain_order: order of algorithm chaining (CIPHER then HASH,
- *                   or HASH then CIPHER)
- * @cipher_key: point to a key of CIPHER
- * @auth_key: point to an authenticated key of MAC
- *
- */
-typedef struct AccelDevBackendCryptoSessionInfo {
-    /* corresponding with virtio crypto spec */
-    uint32_t cipher;
-    uint32_t keylen;
-    uint32_t hash_alg;
-    uint32_t hash_result_len;
-    uint32_t auth_key_len;
-    uint32_t add_len;
-    uint8_t op_type;
-    uint8_t hash_mode;
-    uint8_t alg_chain_order;
-    uint8_t *cipher_key;
-    uint8_t *auth_key;
-} AccelDevBackendCryptoSessionInfo;
+typedef struct AccelDevBackendArg {
+    uint8_t *buf;
+    uint32_t len;
+} AccelDevBackendArg;
 
-typedef struct AccelDevBackendGenOpArg {
-	uint8_t *buf;
-	uint32_t len;
-} AccelDevBackendGenOpArg;
-
-typedef struct AccelDevBackendGenOpInfo {
-	uint32_t in_nr;
-	uint32_t out_nr;
-	AccelDevBackendGenOpArg *in;
-	AccelDevBackendGenOpArg *out;
-} AccelDevBackendGenOpInfo;
+typedef struct AccelDevBackendInfo {
+    uint32_t in_nr;
+    uint32_t out_nr;
+    AccelDevBackendArg *in;
+    AccelDevBackendArg *out;
+} AccelDevBackendInfo;
 
 typedef struct AccelDevBackendSessionInfo {
-    uint32_t op;
-	union {
-		AccelDevBackendCryptoSessionInfo crypto;
-		AccelDevBackendGenOpInfo gen;
-	} u;
+    uint32_t op_type;
+    AccelDevBackendInfo op;
 } AccelDevBackendSessionInfo;
 
-/**
- * AccelDevBackendSymOpInfo:
- *
- * @session_id: session index which was previously
- *              created by acceldev_backend_sym_create_session()
- * @aad_len: byte length of additional authenticated data
- * @iv_len: byte length of initialization vector or counter
- * @src_len: byte length of source data
- * @dst_len: byte length of destination data
- * @digest_result_len: byte length of hash digest result
- * @hash_start_src_offset: Starting point for hash processing, specified
- *  as number of bytes from start of packet in source data, only used for
- *  algorithm chain
- * @cipher_start_src_offset: Starting point for cipher processing, specified
- *  as number of bytes from start of packet in source data, only used for
- *  algorithm chain
- * @len_to_hash: byte length of source data on which the hash
- *  operation will be computed, only used for algorithm chain
- * @len_to_cipher: byte length of source data on which the cipher
- *  operation will be computed, only used for algorithm chain
- * @op_type: operation type (refer to virtio_crypto.h)
- * @iv: point to the initialization vector or counter
- * @src: point to the source data
- * @dst: point to the destination data
- * @aad_data: point to the additional authenticated data
- * @digest_result: point to the digest result data
- * @data[0]: point to the extensional memory by one memory allocation
- *
- */
-typedef struct AccelDevBackendCryptoSymOpInfo {
-    uint32_t aad_len;
-    uint32_t iv_len;
-    uint32_t src_len;
-    uint32_t dst_len;
-    uint32_t digest_result_len;
-    uint32_t hash_start_src_offset;
-    uint32_t cipher_start_src_offset;
-    uint32_t len_to_hash;
-    uint32_t len_to_cipher;
-    uint8_t *iv;
-    uint8_t *src;
-    uint8_t *dst;
-    uint8_t *aad_data;
-    uint8_t *digest_result;
-    uint8_t data[0];
-} AccelDevBackendCryptoSymOpInfo;
-
 typedef struct AccelDevBackendOpInfo {
-    uint32_t op;
-    uint32_t session_id;
-	union {
-		AccelDevBackendCryptoSymOpInfo crypto;
-		AccelDevBackendGenOpInfo gen;
-	} u;
+    uint32_t op_type;
+    uint32_t sess_id;
+    AccelDevBackendInfo op;
 } AccelDevBackendOpInfo;
 
 
@@ -164,13 +77,6 @@ struct AccelDevBackendPeers {
     uint32_t queues;
 };
 
-struct AccelDevBackendCryptoConf {
-    /* Maximum length of cipher key */
-    uint32_t max_cipher_key_len;
-    /* Maximum length of authenticated key */
-    uint32_t max_auth_key_len;
-};
-
 struct AccelDevBackendConf {
     AccelDevBackendPeers peers;
 
@@ -178,10 +84,6 @@ struct AccelDevBackendConf {
     uint32_t services;
     /* Maximum size of each accel request's content */
     uint64_t max_size;
-	
-	union {
-		struct AccelDevBackendCryptoConf crypto;
-	} u;
 };
 
 struct AccelDevBackend {
