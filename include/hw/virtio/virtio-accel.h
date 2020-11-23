@@ -24,25 +24,13 @@ do { \
         OBJECT_GET_PARENT_CLASS(obj, TYPE_VIRTIO_ACCEL)
 
 
-typedef struct VirtIOAccelCryptoConf {
-    /* Maximum length of cipher key */
-    uint32_t max_cipher_key_len;
-    /* Maximum length of authenticated key */
-    uint32_t max_auth_key_len;
-} VirtIOAccelCryptoConf;
-
 typedef struct VirtIOAccelConf {
-    AccelDevBackend *crypto;
     AccelDevBackend *generic;
 
     /* Supported service mask */
     uint32_t services;
     /* Maximum size of each crypto request's content */
     uint64_t max_size;
-
-    union {
-        struct VirtIOAccelCryptoConf crypto;
-    } u;
 } VirtIOAccelConf;
 
 struct VirtIOAccel;
@@ -77,7 +65,6 @@ typedef struct VirtIOAccel {
 
     VirtIOAccelQueue *vqs;
     VirtIOAccelConf conf;
-    AccelDevBackend *crypto;
     AccelDevBackend *generic;
 
     uint32_t max_queues;

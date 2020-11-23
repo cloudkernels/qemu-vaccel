@@ -51,10 +51,10 @@ static void acceldev_generic_init(
     c->info_str = g_strdup_printf("acceldev-generic0");
     c->queue_index = 0;
     ab->conf.peers.ccs[0] = c;
-	
-	// TODO
+
+    // TODO
     //ab->conf.services = 1u << VIRTIO_ACCEL_SERVICE_GENERIC;
-	//
+    //
     ab->conf.max_size = LONG_MAX - sizeof(AccelDevBackendOpInfo);
 
     acceldev_backend_set_ready(ab, true);
@@ -82,10 +82,10 @@ static int64_t acceldev_generic_create_session(
 {
     AccelDevBackendGeneric *generic =
                       ACCELDEV_BACKEND_GENERIC(ab);
-	void *sess_data = NULL;
+    void *sess_data = NULL;
     int ret, i, index = -VIRTIO_ACCEL_ERR;
-	unsigned int sess_type;
-	struct vaccelrt_arg *req_inargs, *req_outargs;
+    unsigned int sess_type;
+    struct vaccelrt_arg *req_inargs, *req_outargs;
     AccelDevBackendGenericSession *sess;
 
     index = acceldev_generic_get_unused_session_index(generic);
@@ -95,53 +95,53 @@ static int64_t acceldev_generic_create_session(
         return -VIRTIO_ACCEL_ERR;
     }
 
-    if (info->u.gen.out_nr < 1) {
-		error_setg(errp, "Generic op requires at least 1 out argument (got %u)",
-				info->u.gen.out_nr);
-		return -VIRTIO_ACCEL_ERR;
-	}
-
-    sess_data = g_new0(struct vaccelrt_session, 1);
-	req_outargs = NULL;
-	if (info->u.gen.out_nr > 0) {
-		req_outargs = g_new0(struct vaccelrt_arg, info->u.gen.out_nr);
-		for (i = 0; i < info->u.gen.out_nr; i++) {
-			req_outargs[i].buf = info->u.gen.out[i].buf;
-			req_outargs[i].len = info->u.gen.out[i].len;
-		}
-	}
-	req_inargs = NULL;
-	if (info->u.gen.in_nr > 0) {
-		req_inargs = g_new0(struct vaccelrt_arg, info->u.gen.in_nr);
-		for (i = 0; i < info->u.gen.in_nr; i++) {
-			req_inargs[i].buf = info->u.gen.in[i].buf;
-			req_inargs[i].len = info->u.gen.in[i].len;
-		}
-	}
-
-	ret = vaccelrt_sess_init(sess_data, req_outargs, req_inargs,
-			info->u.gen.out_nr, info->u.gen.in_nr, &sess_type);
-    if (ret != VACCELRT_OK) {
-		g_free(sess_data);
-        ret = -VIRTIO_ACCEL_ERR;
-		goto free;
+    if (info->op.out_nr < 1) {
+        error_setg(errp, "Generic op requires at least 1 out argument (got %u)",
+                info->op.out_nr);
+        return -VIRTIO_ACCEL_ERR;
     }
 
-	sess = g_new0(AccelDevBackendGenericSession, 1);
+    sess_data = g_new0(struct vaccelrt_session, 1);
+    req_outargs = NULL;
+    if (info->op.out_nr > 0) {
+        req_outargs = g_new0(struct vaccelrt_arg, info->op.out_nr);
+        for (i = 0; i < info->op.out_nr; i++) {
+            req_outargs[i].buf = info->op.out[i].buf;
+            req_outargs[i].len = info->op.out[i].len;
+        }
+    }
+    req_inargs = NULL;
+    if (info->op.in_nr > 0) {
+        req_inargs = g_new0(struct vaccelrt_arg, info->op.in_nr);
+        for (i = 0; i < info->op.in_nr; i++) {
+            req_inargs[i].buf = info->op.in[i].buf;
+            req_inargs[i].len = info->op.in[i].len;
+        }
+    }
+
+    ret = vaccelrt_sess_init(sess_data, req_outargs, req_inargs,
+            info->op.out_nr, info->op.in_nr, &sess_type);
+    if (ret != VACCELRT_OK) {
+        g_free(sess_data);
+        ret = -VIRTIO_ACCEL_ERR;
+        goto free;
+    }
+
+    sess = g_new0(AccelDevBackendGenericSession, 1);
     sess->opaque = sess_data;
-	sess->type = sess_type;
+    sess->type = sess_type;
 
     generic->sessions[index] = sess;
 
     ret = index;
 
 free:
-	if (req_outargs)
-		g_free(req_outargs);
-	if (req_inargs)
-		g_free(req_inargs);
+    if (req_outargs)
+        g_free(req_outargs);
+    if (req_inargs)
+        g_free(req_inargs);
 
-	return ret;
+    return ret;
 }
 
 static int acceldev_generic_destroy_session(
@@ -151,7 +151,7 @@ static int acceldev_generic_destroy_session(
 {
     AccelDevBackendGeneric *generic =
                       ACCELDEV_BACKEND_GENERIC(ab);
-	AccelDevBackendGenericSession *sess;
+    AccelDevBackendGenericSession *sess;
 
     if (sess_id >= MAX_NUM_SESSIONS ||
               generic->sessions[sess_id] == NULL) {
@@ -159,12 +159,12 @@ static int acceldev_generic_destroy_session(
                    sess_id);
         return -VIRTIO_ACCEL_INVSESS;
     }
-	sess = generic->sessions[sess_id];
+    sess = generic->sessions[sess_id];
 
- 	vaccelrt_sess_free((struct vaccelrt_session *)sess->opaque);
-	
-	g_free(sess->opaque);
-	g_free(sess);
+     vaccelrt_sess_free((struct vaccelrt_session *)sess->opaque);
+    
+    g_free(sess->opaque);
+    g_free(sess);
     generic->sessions[sess_id] = NULL;
 
     return VIRTIO_ACCEL_OK;
@@ -178,56 +178,56 @@ static int acceldev_generic_operation(
     AccelDevBackendGeneric *generic =
                       ACCELDEV_BACKEND_GENERIC(ab);
     AccelDevBackendGenericSession *sess;
-	struct vaccelrt_arg *req_inargs, *req_outargs;
+    struct vaccelrt_arg *req_inargs, *req_outargs;
     int ret, i;
 
-    if (info->session_id >= MAX_NUM_SESSIONS ||
-              generic->sessions[info->session_id] == NULL) {
+    if (info->sess_id >= MAX_NUM_SESSIONS ||
+              generic->sessions[info->sess_id] == NULL) {
         error_setg(errp, "Cannot find a valid session id: %" PRIu32 "",
-                   info->session_id);
+                   info->sess_id);
         return -VIRTIO_ACCEL_INVSESS;
     }
 
-    if (info->u.gen.out_nr < 1) {
-		error_setg(errp, "Generic op requires at least 1 out argument (got %u)",
-				info->u.gen.out_nr);
-		return -VIRTIO_ACCEL_ERR;
-	}
-    sess = generic->sessions[info->session_id];
+    if (info->op.out_nr < 1) {
+        error_setg(errp, "Generic op requires at least 1 out argument (got %u)",
+                info->op.out_nr);
+        return -VIRTIO_ACCEL_ERR;
+    }
+    sess = generic->sessions[info->sess_id];
 
-	req_outargs = NULL;
-	if (info->u.gen.out_nr > 0) {
-		req_outargs = g_new0(struct vaccelrt_arg, info->u.gen.out_nr);
-		for (i = 0; i < info->u.gen.out_nr; i++) {
-			req_outargs[i].buf = info->u.gen.out[i].buf;
-			req_outargs[i].len = info->u.gen.out[i].len;
-		}
-	}
-	req_inargs = NULL;
-	if (info->u.gen.in_nr > 0) {
-		req_inargs = g_new0(struct vaccelrt_arg, info->u.gen.in_nr);
-		for (i = 0; i < info->u.gen.in_nr; i++) {
-			req_inargs[i].buf = info->u.gen.in[i].buf;
-			req_inargs[i].len = info->u.gen.in[i].len;
-		}
-	}
-
-	ret = vaccelrt_do_op((struct vaccelrt_session *)sess->opaque,
-			req_outargs, req_inargs, info->u.gen.out_nr, info->u.gen.in_nr);
-    if (ret != VACCELRT_OK) {
-        ret = -VIRTIO_ACCEL_ERR;
-		goto free;
+    req_outargs = NULL;
+    if (info->op.out_nr > 0) {
+        req_outargs = g_new0(struct vaccelrt_arg, info->op.out_nr);
+        for (i = 0; i < info->op.out_nr; i++) {
+            req_outargs[i].buf = info->op.out[i].buf;
+            req_outargs[i].len = info->op.out[i].len;
+        }
+    }
+    req_inargs = NULL;
+    if (info->op.in_nr > 0) {
+        req_inargs = g_new0(struct vaccelrt_arg, info->op.in_nr);
+        for (i = 0; i < info->op.in_nr; i++) {
+            req_inargs[i].buf = info->op.in[i].buf;
+            req_inargs[i].len = info->op.in[i].len;
+        }
     }
 
-	ret = VIRTIO_ACCEL_OK;
+    ret = vaccelrt_do_op((struct vaccelrt_session *)sess->opaque,
+            req_outargs, req_inargs, info->op.out_nr, info->op.in_nr);
+    if (ret != VACCELRT_OK) {
+        ret = -VIRTIO_ACCEL_ERR;
+        goto free;
+    }
+
+    ret = VIRTIO_ACCEL_OK;
 
 free:
-	if (req_outargs)
-		g_free(req_outargs);
-	if (req_inargs)
-		g_free(req_inargs);
+    if (req_outargs)
+        g_free(req_outargs);
+    if (req_inargs)
+        g_free(req_inargs);
 
-	return ret;
+    return ret;
 }
 
 static void acceldev_generic_cleanup(
