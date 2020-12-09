@@ -71,11 +71,13 @@ static int
 virtio_accel_gen_create_session(VirtIOAccelReq *req)
 {
     VirtIOAccel *vaccel = req->vaccel;
+    VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
     struct virtio_accel_hdr *h = &req->hdr;
     int queue_index = virtio_get_queue_index(req->vq);
     AccelDevBackendSessionInfo info;
     int64_t sess_id;
     int ret = -VIRTIO_ACCEL_ERR;
+    size_t r;
     Error *local_err = NULL;
 
     info.op_type = h->op_type;
@@ -89,11 +91,15 @@ virtio_accel_gen_create_session(VirtIOAccelReq *req)
     if (sess_id >= 0) {
         req->hdr.sess_id = (uint32_t)sess_id;
         for (int i = 0; i < h->op.in_nr; i++) {
-                iov_from_buf(req->in_iov, req->in_niov, 0, info.op.in[i].buf,
-                                h->op.in[i].len);
+                r = iov_from_buf(req->in_iov, req->in_niov, 0, info.op.in[i].buf,
+                                info.op.in[i].len);
+                if (unlikely(r != info.op.in[i].len)) {
+                    virtio_error(vdev, "virtio-accel in[%d] data incorrect", i);
+		    return -VIRTIO_ACCEL_ERR;
+		}
 
                 iov_discard_front(&req->in_iov, &req->in_niov,
-                                h->op.in[i].len);
+                                info.op.in[i].len);
         }
 
         VADPRINTF("generic create session_id=%" PRIu32 " successful\n",
@@ -138,10 +144,12 @@ static int
 virtio_accel_gen_do_op(VirtIOAccelReq *req)
 {
     VirtIOAccel *vaccel = req->vaccel;
+    VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
     struct virtio_accel_hdr *h = &req->hdr;
     int queue_index = virtio_get_queue_index(req->vq);
     AccelDevBackendOpInfo info;
     int ret = -VIRTIO_ACCEL_ERR;
+    size_t r;
     Error *local_err = NULL;
 
     info.op_type = h->op_type;
@@ -155,11 +163,15 @@ virtio_accel_gen_do_op(VirtIOAccelReq *req)
 
     if (ret >= 0) {
         for (int i = 0; i < h->op.in_nr; i++) {
-                iov_from_buf(req->in_iov, req->in_niov, 0, info.op.in[i].buf,
-                                h->op.in[i].len);
+                r = iov_from_buf(req->in_iov, req->in_niov, 0, info.op.in[i].buf,
+                                info.op.in[i].len);
+                if (unlikely(r != info.op.in[i].len)) {
+                    virtio_error(vdev, "virtio-accel in[%d] data incorrect", i);
+		    return -VIRTIO_ACCEL_ERR;
+		}
 
                 iov_discard_front(&req->in_iov, &req->in_niov,
-                                h->op.in[i].len);
+                                info.op.in[i].len);
         }
 
         VADPRINTF("generic op session_id=%" PRIu32 " successful\n",
@@ -180,6 +192,7 @@ virtio_accel_handle_req_header_data(VirtIOAccelReq *req)
     VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
     struct virtio_accel_hdr *h = &req->hdr;
     int i;
+    size_t r;
     AccelDevBackendArg *gop_arg;
 
     h->op_type = virtio_ldl_p(vdev, &h->op_type);
@@ -196,8 +209,9 @@ virtio_accel_handle_req_header_data(VirtIOAccelReq *req)
                                     h->op.out_nr);
             for (i = 0; i < h->op.out_nr; i++) {
                 gop_arg[i].buf = g_malloc0(h->op.out[i].len);
-                if (unlikely(iov_to_buf(req->out_iov, req->out_niov, 0, gop_arg[i].buf,
-                                h->op.out[i].len) != h->op.out[i].len)) {
+                r = iov_to_buf(req->out_iov, req->out_niov, 0, gop_arg[i].buf,
+                                h->op.out[i].len);
+                if (unlikely(r !=  h->op.out[i].len)) {
                     virtio_error(vdev, "virtio-accel gop_arg[%d] too short", i);
                     return;
                 }
