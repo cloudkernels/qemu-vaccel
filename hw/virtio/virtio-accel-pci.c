@@ -34,10 +34,6 @@ static void virtio_accel_pci_realize(VirtIOPCIProxy *vpci_dev, Error **errp)
     VirtIOAccelPCI *vaccel = VIRTIO_ACCEL_PCI(vpci_dev);
     DeviceState *vdev = DEVICE(&vaccel->vdev);
 
-    if (vaccel->vdev.conf.crypto == NULL) {
-        error_setg(errp, "'crypto' parameter expects a valid object");
-        return;
-    }
     if (vaccel->vdev.conf.generic == NULL) {
         error_setg(errp, "'generic' parameter expects a valid object");
         return;
@@ -46,9 +42,6 @@ static void virtio_accel_pci_realize(VirtIOPCIProxy *vpci_dev, Error **errp)
     qdev_set_parent_bus(vdev, BUS(&vpci_dev->bus));
     virtio_pci_force_virtio_1(vpci_dev);
     object_property_set_bool(OBJECT(vdev), true, "realized", errp);
-    object_property_set_link(OBJECT(vaccel),
-                 OBJECT(vaccel->vdev.conf.crypto), "crypto",
-                 NULL);
     object_property_set_link(OBJECT(vaccel),
                  OBJECT(vaccel->vdev.conf.generic), "generic",
                  NULL);

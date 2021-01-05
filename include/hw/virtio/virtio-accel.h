@@ -24,51 +24,40 @@ do { \
         OBJECT_GET_PARENT_CLASS(obj, TYPE_VIRTIO_ACCEL)
 
 
-typedef struct VirtIOAccelCryptoConf {
-    /* Maximum length of cipher key */
-    uint32_t max_cipher_key_len;
-    /* Maximum length of authenticated key */
-    uint32_t max_auth_key_len;
-} VirtIOAccelCryptoConf;
-
 typedef struct VirtIOAccelConf {
-    AccelDevBackend *crypto;
     AccelDevBackend *generic;
 
     /* Supported service mask */
     uint32_t services;
     /* Maximum size of each crypto request's content */
     uint64_t max_size;
-
-	union {
-		struct VirtIOAccelCryptoConf crypto;
-	} u;
 } VirtIOAccelConf;
 
 struct VirtIOAccel;
 
 typedef struct VirtIOAccelReq {
-	/* elem should always be first */
+    /* elem should always be first */
     VirtQueueElement elem;
     
-	VirtQueue *vq;
+    VirtQueue *vq;
     /* flags of operation, such as type of algorithm */
     uint32_t flags;
 
-	struct virtio_accel_hdr hdr;
-	struct VirtIOAccel *vaccel;
-	struct iovec *in_iov;
-	struct iovec *out_iov;
-	unsigned int in_niov;
-	unsigned int out_niov;
+    struct virtio_accel_hdr hdr;
+    struct VirtIOAccel *vaccel;
+    struct iovec *in_iov;
+    struct iovec *out_iov;
+    unsigned int in_niov;
+    unsigned int out_niov;
     size_t in_iov_len;
-	uint32_t *in_status;
+    AccelDevBackendOpInfo info;
+    uint32_t *in_status;
 } VirtIOAccelReq;
 
 typedef struct VirtIOAccelQueue {
     VirtQueue *dataq;
     QEMUBH *dataq_bh;
-	struct VirtIOAccel *vaccel;
+    struct VirtIOAccel *vaccel;
 } VirtIOAccelQueue;
 
 typedef struct VirtIOAccel {
@@ -76,7 +65,6 @@ typedef struct VirtIOAccel {
 
     VirtIOAccelQueue *vqs;
     VirtIOAccelConf conf;
-    AccelDevBackend *crypto;
     AccelDevBackend *generic;
 
     uint32_t max_queues;
