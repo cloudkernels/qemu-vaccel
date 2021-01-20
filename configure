@@ -3088,12 +3088,12 @@ then
 fi
 
 ##########################################
-# libvaccel_runtime
+# libvaccel (vaccelrt)
 
-vaccel_runtime=yes
-if test "$vaccel_runtime" = "yes" ; then
-  libs_tools="-lvaccel_runtime $libs_tools"
-  libs_softmmu="-lvaccel_runtime $libs_softmmu"
+vaccel=yes
+if test "$vaccel" = "yes" ; then
+  libs_tools="-lvaccel $libs_tools"
+  libs_softmmu="-lvaccel $libs_softmmu"
 fi
 
 ##########################################
@@ -6615,7 +6615,6 @@ echo "VTE support       $vte $(echo_version $vte $vteversion)"
 echo "TLS priority      $tls_priority"
 echo "GNUTLS support    $gnutls"
 echo "libgcrypt         $gcrypt"
-echo "vaccel_runtime    $vaccel_runtime"
 if test "$gcrypt" = "yes"
 then
    echo "  hmac            $gcrypt_hmac"
@@ -6626,6 +6625,7 @@ if test "$nettle" = "yes"
 then
    echo "  XTS             $nettle_xts"
 fi
+echo "vaccel            $vaccel"
 echo "libtasn1          $tasn1"
 echo "PAM               $auth_pam"
 echo "iconv support     $iconv"
@@ -7098,9 +7098,6 @@ echo "CONFIG_TLS_PRIORITY=\"$tls_priority\"" >> $config_host_mak
 if test "$gnutls" = "yes" ; then
   echo "CONFIG_GNUTLS=y" >> $config_host_mak
 fi
-if test "$vaccel_runtime" = "yes" ; then
-  echo "CONFIG_VACCEL_RUNTIME=y" >> $config_host_mak
-fi
 if test "$gcrypt" = "yes" ; then
   echo "CONFIG_GCRYPT=y" >> $config_host_mak
   if test "$gcrypt_hmac" = "yes" ; then
@@ -7110,6 +7107,9 @@ fi
 if test "$nettle" = "yes" ; then
   echo "CONFIG_NETTLE=y" >> $config_host_mak
   echo "CONFIG_NETTLE_VERSION_MAJOR=${nettle_version%%.*}" >> $config_host_mak
+fi
+if test "$vaccel" = "yes" ; then
+  echo "CONFIG_VACCEL=y" >> $config_host_mak
 fi
 if test "$qemu_private_xts" = "yes" ; then
   echo "CONFIG_QEMU_PRIVATE_XTS=y" >> $config_host_mak

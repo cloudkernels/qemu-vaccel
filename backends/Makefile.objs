@@ -9,8 +9,10 @@ common-obj-$(CONFIG_POSIX) += hostmem-file.o
 common-obj-y += cryptodev.o
 common-obj-y += cryptodev-builtin.o
 
+ifeq ($(CONFIG_VIRTIO_ACCEL),y)
 common-obj-y += acceldev.o
-common-obj-y += acceldev-generic.o
+common-obj-$(CONFIG_VACCEL) += acceldev-vaccelrt.o
+endif
 
 ifeq ($(CONFIG_VIRTIO_CRYPTO),y)
 common-obj-y += cryptodev-vhost.o
