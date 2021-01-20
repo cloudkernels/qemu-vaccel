@@ -24,11 +24,6 @@ typedef struct AccelDevBackendPeers AccelDevBackendPeers;
 typedef struct AccelDevBackendClient AccelDevBackendClient;
 typedef struct AccelDevBackend AccelDevBackend;
 
-enum AccelDevBackendCryptoAlgType {
-    ACCELDEV_BACKEND_CRYPTO_ALG_SYM,
-    ACCELDEV_BACKEND_CRYPTO_ALG__MAX,
-};
-
 typedef struct AccelDevBackendArg {
     uint8_t *buf;
     uint32_t len;

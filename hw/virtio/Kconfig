@@ -47,3 +47,8 @@ config VIRTIO_PMEM
     depends on VIRTIO
     depends on VIRTIO_PMEM_SUPPORTED
     select MEM_DEVICE
+
+config VIRTIO_ACCEL
+    bool
+    default y
+    depends on VIRTIO
