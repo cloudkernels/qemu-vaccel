@@ -25,7 +25,7 @@ do { \
 
 
 typedef struct VirtIOAccelConf {
-    AccelDevBackend *generic;
+    AccelDevBackend *runtime;
 
     /* Supported service mask */
     uint32_t services;
@@ -65,7 +65,7 @@ typedef struct VirtIOAccel {
 
     VirtIOAccelQueue *vqs;
     VirtIOAccelConf conf;
-    AccelDevBackend *generic;
+    AccelDevBackend *runtime;
 
     uint32_t max_queues;
     uint32_t status;

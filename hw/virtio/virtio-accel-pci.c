@@ -14,8 +14,8 @@ typedef struct VirtIOAccelPCI VirtIOAccelPCI;
  * virtio-accel-pci: This extends VirtioPCIProxy.
  */
 #define TYPE_VIRTIO_ACCEL_PCI "virtio-accel-pci"
-#define VIRTIO_ACCEL_PCI(obj) \
-        OBJECT_CHECK(VirtIOAccelPCI, (obj), TYPE_VIRTIO_ACCEL_PCI)
+DECLARE_INSTANCE_CHECKER(VirtIOAccelPCI, VIRTIO_ACCEL_PCI,
+                         TYPE_VIRTIO_ACCEL_PCI)
 
 struct VirtIOAccelPCI {
     VirtIOPCIProxy parent_obj;
@@ -34,17 +34,15 @@ static void virtio_accel_pci_realize(VirtIOPCIProxy *vpci_dev, Error **errp)
     VirtIOAccelPCI *vaccel = VIRTIO_ACCEL_PCI(vpci_dev);
     DeviceState *vdev = DEVICE(&vaccel->vdev);
 
-    if (vaccel->vdev.conf.generic == NULL) {
-        error_setg(errp, "'generic' parameter expects a valid object");
+    if (vaccel->vdev.conf.runtime == NULL) {
+        error_setg(errp, "'runtime' parameter expects a valid object");
         return;
     }
 
-    qdev_set_parent_bus(vdev, BUS(&vpci_dev->bus));
     virtio_pci_force_virtio_1(vpci_dev);
-    object_property_set_bool(OBJECT(vdev), true, "realized", errp);
-    object_property_set_link(OBJECT(vaccel),
-                 OBJECT(vaccel->vdev.conf.generic), "generic",
-                 NULL);
+    if (!qdev_realize(vdev, BUS(&vpci_dev->bus), errp)) {
+        return;
+    }
 }
 
 static void virtio_accel_pci_class_init(ObjectClass *klass, void *data)

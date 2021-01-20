@@ -7,8 +7,8 @@
 
 #include "hw/virtio/virtio.h"
 #include "hw/virtio/virtio-accel.h"
-#include "hw/virtio/virtio-access.h"
 #include "hw/qdev-properties.h"
+#include "hw/virtio/virtio-access.h"
 #include "standard-headers/linux/virtio_ids.h"
 
 #define VIRTIO_ACCEL_VM_VERSION 1
@@ -68,7 +68,7 @@ virtio_accel_get_request(VirtIOAccel *va, VirtQueue *vq)
 }
 
 static int
-virtio_accel_gen_create_session(VirtIOAccelReq *req)
+virtio_accel_vaccel_create_session(VirtIOAccelReq *req)
 {
     VirtIOAccel *vaccel = req->vaccel;
     VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
@@ -86,7 +86,7 @@ virtio_accel_gen_create_session(VirtIOAccelReq *req)
     info.op.in_nr = h->op.in_nr;
     info.op.out_nr = h->op.out_nr;
     sess_id = acceldev_backend_create_session(
-                                     vaccel->generic,
+                                     vaccel->runtime,
                                      &info, queue_index, &local_err);
     if (sess_id >= 0) {
         req->hdr.sess_id = (uint32_t)sess_id;
@@ -95,14 +95,14 @@ virtio_accel_gen_create_session(VirtIOAccelReq *req)
                                 info.op.in[i].len);
                 if (unlikely(r != info.op.in[i].len)) {
                     virtio_error(vdev, "virtio-accel in[%d] data incorrect", i);
-		    return -VIRTIO_ACCEL_ERR;
-		}
+            return -VIRTIO_ACCEL_ERR;
+        }
 
                 iov_discard_front(&req->in_iov, &req->in_niov,
                                 info.op.in[i].len);
         }
 
-        VADPRINTF("generic create session_id=%" PRIu32 " successful\n",
+        VADPRINTF("runtime create session_id=%" PRIu32 " successful\n",
                   req->hdr.sess_id);
         ret = VIRTIO_ACCEL_OK;
     } else {
@@ -116,7 +116,7 @@ virtio_accel_gen_create_session(VirtIOAccelReq *req)
 }
 
 static int
-virtio_accel_gen_destroy_session(VirtIOAccelReq *req)
+virtio_accel_vaccel_destroy_session(VirtIOAccelReq *req)
 {
     VirtIOAccel *vaccel = req->vaccel;
     struct virtio_accel_hdr *h = &req->hdr;
@@ -125,11 +125,11 @@ virtio_accel_gen_destroy_session(VirtIOAccelReq *req)
     Error *local_err = NULL;
 
     ret = acceldev_backend_destroy_session(
-                                     vaccel->generic,
+                                     vaccel->runtime,
                                      h->sess_id,
                                      queue_index, &local_err);
     if (ret >= 0) {
-        VADPRINTF("generic destroy session_id=%" PRIu32 " successful\n",
+        VADPRINTF("runtime destroy session_id=%" PRIu32 " successful\n",
                 req->hdr.sess_id);
     } else {
         if (local_err) {
@@ -141,7 +141,7 @@ virtio_accel_gen_destroy_session(VirtIOAccelReq *req)
 }
 
 static int
-virtio_accel_gen_do_op(VirtIOAccelReq *req)
+virtio_accel_vaccel_do_op(VirtIOAccelReq *req)
 {
     VirtIOAccel *vaccel = req->vaccel;
     VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
@@ -158,7 +158,7 @@ virtio_accel_gen_do_op(VirtIOAccelReq *req)
     info.op.out = (AccelDevBackendArg *)h->op.out;
     info.op.in_nr = h->op.in_nr;
     info.op.out_nr = h->op.out_nr;
-    ret = acceldev_backend_operation(vaccel->generic, &info, queue_index,
+    ret = acceldev_backend_operation(vaccel->runtime, &info, queue_index,
                                         &local_err);
 
     if (ret >= 0) {
@@ -167,14 +167,14 @@ virtio_accel_gen_do_op(VirtIOAccelReq *req)
                                 info.op.in[i].len);
                 if (unlikely(r != info.op.in[i].len)) {
                     virtio_error(vdev, "virtio-accel in[%d] data incorrect", i);
-		    return -VIRTIO_ACCEL_ERR;
-		}
+            return -VIRTIO_ACCEL_ERR;
+        }
 
                 iov_discard_front(&req->in_iov, &req->in_niov,
                                 info.op.in[i].len);
         }
 
-        VADPRINTF("generic op session_id=%" PRIu32 " successful\n",
+        VADPRINTF("runtime op session_id=%" PRIu32 " successful\n",
                 info.sess_id);
     } else {
         if (local_err) {
@@ -299,11 +299,11 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
     case VIRTIO_ACCEL_CREATE_SESSION:
     case VIRTIO_ACCEL_DO_OP:
         if (req->hdr.op_type == VIRTIO_ACCEL_CREATE_SESSION) {
-            ret = virtio_accel_gen_create_session(req);
+            ret = virtio_accel_vaccel_create_session(req);
             if (ret >= 0)
                 virtio_stq_p(vdev, in_iov->iov_base, req->hdr.sess_id);
         } else {
-            ret = virtio_accel_gen_do_op(req);
+            ret = virtio_accel_vaccel_do_op(req);
         }
         /* Serious errors, need to reset virtio accel device */
         if (ret == -EFAULT)
@@ -313,7 +313,7 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
         virtio_accel_free_request(req);
         break;
     case VIRTIO_ACCEL_DESTROY_SESSION:
-        ret = virtio_accel_gen_destroy_session(req);
+        ret = virtio_accel_vaccel_destroy_session(req);
         /* Serious errors, need to reset virtio accel device */
         if (ret == -EFAULT)
             return -1;
@@ -400,7 +400,7 @@ static void virtio_accel_reset(VirtIODevice *vdev)
     VirtIOAccel *vaccel = VIRTIO_ACCEL(vdev);
     /* multiqueue is disabled by default */
     vaccel->curr_queue = 1;
-    if (!acceldev_backend_is_ready(vaccel->generic)) {
+    if (!acceldev_backend_is_ready(vaccel->runtime)) {
         vaccel->status &= ~VIRTIO_ACCEL_S_HW_READY;
     } else {
         vaccel->status |= VIRTIO_ACCEL_S_HW_READY;
@@ -424,20 +424,19 @@ static void virtio_accel_device_realize(DeviceState *dev, Error **errp)
     VirtIOAccel *vaccel = VIRTIO_ACCEL(dev);
     int i;
 
-    vaccel->generic = vaccel->conf.generic;
-    if (vaccel->generic == NULL) {
-        error_setg(errp, "'generic' parameter expects a valid object");
+    vaccel->runtime = vaccel->conf.runtime;
+    if (vaccel->runtime == NULL) {
+        error_setg(errp, "'runtime' parameter expects a valid object");
         return;
-    } else if (acceldev_backend_is_used(vaccel->generic)) {
-        char *path = object_get_canonical_path_component(OBJECT(
-				                         vaccel->conf.generic));
-        error_setg(errp, "can't use already used accel backend: %s", path);
-        g_free(path);
-	return;
+    } else if (acceldev_backend_is_used(vaccel->runtime)) {
+        error_setg(errp, "can't use already used accel backend: %s",
+                object_get_canonical_path_component(OBJECT(
+                        vaccel->conf.runtime)));
+    return;
     }
 
 
-    vaccel->max_queues = MAX(vaccel->generic->conf.peers.queues, 1);
+    vaccel->max_queues = MAX(vaccel->runtime->conf.peers.queues, 1);
     if (vaccel->max_queues + 1 > VIRTIO_QUEUE_MAX) {
         error_setg(errp, "Invalid number of queues (= %" PRIu32 "), "
                    "must be a positive integer less than %d.",
@@ -445,33 +444,34 @@ static void virtio_accel_device_realize(DeviceState *dev, Error **errp)
         return;
     }
 
-    virtio_init(vdev, "virtio-accel", VIRTIO_ID_ACCEL, vaccel->config_size);
+    virtio_init(vdev, VIRTIO_ID_ACCEL, vaccel->config_size);
     vaccel->curr_queue = 1;
-    vaccel->vqs = g_malloc0(sizeof(VirtIOAccelQueue) * vaccel->max_queues);
+    vaccel->vqs = g_new0(VirtIOAccelQueue, vaccel->max_queues);
     for (i = 0; i < vaccel->max_queues; i++) {
         vaccel->vqs[i].dataq =
-                 virtio_add_queue(vdev, VIRTQUEUE_MAX_SIZE, virtio_accel_dataq_callback);
+                 virtio_add_queue(vdev, VIRTQUEUE_MAX_SIZE,
+                         virtio_accel_dataq_callback);
         vaccel->vqs[i].dataq_bh =
                  qemu_bh_new(virtio_accel_dataq_bh_callback, &vaccel->vqs[i]);
-                 vaccel->vqs[i].vaccel = vaccel;
+        vaccel->vqs[i].vaccel = vaccel;
     }
 
-    if (!acceldev_backend_is_ready(vaccel->generic)) {
+    if (!acceldev_backend_is_ready(vaccel->runtime)) {
         vaccel->status &= ~VIRTIO_ACCEL_S_HW_READY;
     } else {
         vaccel->status |= VIRTIO_ACCEL_S_HW_READY;
     }
 
     virtio_accel_init_config(vdev);
-    acceldev_backend_set_used(vaccel->generic, true);
+    acceldev_backend_set_used(vaccel->runtime, true);
 
     if (virtio_vdev_has_feature(vdev, VIRTIO_F_RING_PACKED))
-	    VADPRINTF("HAS VIRTIO_F_RING_PACKED\n");
+        VADPRINTF("HAS VIRTIO_F_RING_PACKED\n");
     else
-	    VADPRINTF("NO VIRTIO_F_RING_PACKED\n");
+        VADPRINTF("NO VIRTIO_F_RING_PACKED\n");
 }
 
-static void virtio_accel_device_unrealize(DeviceState *dev, Error **errp)
+static void virtio_accel_device_unrealize(DeviceState *dev)
 {
     VirtIODevice *vdev = VIRTIO_DEVICE(dev);
     VirtIOAccel *vaccel = VIRTIO_ACCEL(dev);
@@ -480,7 +480,7 @@ static void virtio_accel_device_unrealize(DeviceState *dev, Error **errp)
 
     max_queues = vaccel->multiqueue ? vaccel->max_queues : 1;
     for (i = 0; i < max_queues; i++) {
-        virtio_del_queue(vdev, i);
+        virtio_delete_queue(vaccel->vqs[i].dataq);
         q = &vaccel->vqs[i];
         qemu_bh_delete(q->dataq_bh);
     }
@@ -488,7 +488,7 @@ static void virtio_accel_device_unrealize(DeviceState *dev, Error **errp)
     g_free(vaccel->vqs);
 
     virtio_cleanup(vdev);
-    acceldev_backend_set_used(vaccel->generic, false);
+    acceldev_backend_set_used(vaccel->runtime, false);
 }
 
 static const VMStateDescription vmstate_virtio_accel = {
@@ -504,7 +504,7 @@ static const VMStateDescription vmstate_virtio_accel = {
 
 static Property virtio_accel_properties[] = {
 
-    DEFINE_PROP_LINK("generic", VirtIOAccel, conf.generic,
+    DEFINE_PROP_LINK("runtime", VirtIOAccel, conf.runtime,
                      TYPE_ACCELDEV_BACKEND, AccelDevBackend *),
     DEFINE_PROP_END_OF_LIST(),
 };

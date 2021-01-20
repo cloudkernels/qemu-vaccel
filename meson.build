@@ -1646,8 +1646,7 @@ if libbpf.found() and not cc.links('''
   endif
 endif
 
-# vaccel
-vaccel = cc.find_library('vaccel-runtime', has_headers: ['vaccel-runtime.h'],
+vaccel = cc.find_library('vaccel', has_headers: ['vaccel.h'],
                             required: get_option('vaccel'),
                             kwargs: static_kwargs)
 
