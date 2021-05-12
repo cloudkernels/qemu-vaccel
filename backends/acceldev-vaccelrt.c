@@ -64,9 +64,7 @@ static int
 acceldev_vaccelrt_get_unused_session_index(
                  AccelDevBackendVaccelRT *vaccelrt)
 {
-    size_t i;
-
-    for (i = 0; i < MAX_NUM_SESSIONS; i++) {
+    for (int i = 0; i < MAX_NUM_SESSIONS; i++) {
         if (vaccelrt->sessions[i] == NULL) {
             return i;
         }
@@ -137,26 +135,37 @@ static int _acceldev_vaccelrt_operation(struct vaccel_session *sess,
 {
     AccelDevBackendArg *in_args = info->op.in;
     AccelDevBackendArg *out_args = info->op.out;
-    unsigned int op_type = *(unsigned int *)out_args[0].buf;
-    int ret = -VIRTIO_ACCEL_ERR;
+    struct vaccel_arg *req_inargs = NULL, *req_outargs = NULL;
+    int ret;
 
-    switch (op_type) {
-        case VACCEL_IMG_CLASS:
-            ret = vaccel_image_classification(sess,
-                        (void *)out_args[1].buf,         /* img */
-                        (unsigned char *)in_args[0].buf, /* out_text */
-                        (unsigned char *)in_args[1].buf, /* out_imgname */
-                        out_args[1].len,                 /* len_img */
-                        in_args[0].len,                  /* len_out_text */
-                        in_args[1].len                   /* len_out_imgname */);
-            break;
-        case VACCEL_NO_OP:
-        case VACCEL_BLAS_SGEMM:
-        case VACCEL_IMG_DETEC:
-        case VACCEL_IMG_SEGME:
-        default:
-            break;
+    if (info->op.out_nr > 0) {
+        req_outargs = g_new0(struct vaccel_arg, info->op.out_nr);
+        for (int i = 0; i < info->op.out_nr; i++) {
+            req_outargs[i].buf = out_args[i].buf;
+            req_outargs[i].size = out_args[i].len;
+        }
     }
+
+    if (info->op.in_nr > 0) {
+        req_inargs = g_new0(struct vaccel_arg, info->op.in_nr);
+        for (int i = 0; i < info->op.in_nr; i++) {
+            req_inargs[i].buf = in_args[i].buf;
+            req_inargs[i].size = in_args[i].len;
+        }
+    }
+
+    ret = vaccel_genop(sess, req_outargs, info->op.out_nr,
+                       req_inargs, info->op.in_nr);
+
+    if (ret != VACCEL_OK)
+        ret = -VIRTIO_ACCEL_ERR;
+    else
+        ret = VIRTIO_ACCEL_OK;
+
+    if (req_outargs)
+        g_free(req_outargs);
+    if (req_inargs)
+        g_free(req_inargs);
 
     return ret;
 }
@@ -199,18 +208,17 @@ static void acceldev_vaccelrt_cleanup(
 {
     AccelDevBackendVaccelRT *vaccelrt =
                       ACCELDEV_BACKEND_VACCELRT(ab);
-    size_t i;
     int queues = ab->conf.peers.queues;
     AccelDevBackendClient *c;
 
-    for (i = 0; i < MAX_NUM_SESSIONS; i++) {
+    for (int i = 0; i < MAX_NUM_SESSIONS; i++) {
         if (vaccelrt->sessions[i] != NULL) {
             acceldev_vaccelrt_destroy_session(
                     ab, i, 0, errp);
         }
     }
 
-    for (i = 0; i < queues; i++) {
+    for (int i = 0; i < queues; i++) {
         c = ab->conf.peers.ccs[i];
         if (c) {
             acceldev_backend_free_client(c);
