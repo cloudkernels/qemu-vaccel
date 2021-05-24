@@ -30,7 +30,7 @@ typedef struct AccelDevBackendVaccelRTSession {
 struct AccelDevBackendVaccelRT {
     AccelDevBackend parent_obj;
 
-    AccelDevBackendVaccelRTSession *sessions[MAX_NUM_SESSIONS];
+    AccelDevBackendVaccelRTSession *sessions[MAX_NUM_SESSIONS+1];
 };
 
 static void acceldev_vaccelrt_init(
@@ -64,7 +64,8 @@ static int
 acceldev_vaccelrt_get_unused_session_index(
                  AccelDevBackendVaccelRT *vaccelrt)
 {
-    for (int i = 0; i < MAX_NUM_SESSIONS; i++) {
+	// vaccelrt expects session ids > 0
+    for (int i = 1; i < MAX_NUM_SESSIONS+1; i++) {
         if (vaccelrt->sessions[i] == NULL) {
             return i;
         }
