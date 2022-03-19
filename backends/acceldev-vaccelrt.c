@@ -15,7 +15,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(AccelDevBackendVaccelRT, ACCELDEV_BACKEND_VACCELRT)
 
 typedef struct AccelDevBackendVaccelRTSession {
     void *opaque;
-    unsigned int type;
+    uint32_t session_id;
     QTAILQ_ENTRY(AccelDevBackendVaccelRTSession) next;
 } AccelDevBackendVaccelRTSession;
 
@@ -25,7 +25,7 @@ typedef struct AccelDevBackendVaccelRTSession {
 struct AccelDevBackendVaccelRT {
     AccelDevBackend parent_obj;
 
-    AccelDevBackendVaccelRTSession *sessions[MAX_NUM_SESSIONS+1];
+    AccelDevBackendVaccelRTSession *sessions[MAX_NUM_SESSIONS];
 };
 
 static void acceldev_vaccelrt_init(
@@ -55,13 +55,25 @@ static void acceldev_vaccelrt_init(
     acceldev_backend_set_ready(ab, true);
 }
 
-static int
-acceldev_vaccelrt_get_unused_session_index(
+static int acceldev_vaccelrt_get_unused_session_index(
                  AccelDevBackendVaccelRT *vaccelrt)
 {
-	// vaccelrt expects session ids > 0
-    for (int i = 1; i < MAX_NUM_SESSIONS+1; i++) {
+    for (int i = 0; i < MAX_NUM_SESSIONS; i++) {
         if (vaccelrt->sessions[i] == NULL) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+static int acceldev_vaccelrt_get_session_index_by_id(
+                 AccelDevBackendVaccelRT *vaccelrt,
+		 uint32_t session_id)
+{
+    for (int i = 0; i < MAX_NUM_SESSIONS; i++) {
+        if (vaccelrt->sessions[i] != NULL &&
+			vaccelrt->sessions[i]->session_id == session_id) {
             return i;
         }
     }
@@ -77,9 +89,8 @@ static int64_t acceldev_vaccelrt_create_session(
     AccelDevBackendVaccelRT *vaccelrt =
                       ACCELDEV_BACKEND_VACCELRT(ab);
     struct vaccel_session *sess_data = NULL;
-    int index;
-    //unsigned int sess_type;
     AccelDevBackendVaccelRTSession *sess;
+    int index, ret;
 
     index = acceldev_vaccelrt_get_unused_session_index(vaccelrt);
     if (index < 0) {
@@ -89,15 +100,18 @@ static int64_t acceldev_vaccelrt_create_session(
     }
 
     sess_data = g_new0(struct vaccel_session, 1);
-    sess_data->session_id = index;
+
+    ret = vaccel_sess_init(sess_data, 0);
+    if (ret != VACCEL_OK)
+        return -VIRTIO_ACCEL_ERR;
 
     sess = g_new0(AccelDevBackendVaccelRTSession, 1);
     sess->opaque = sess_data;
-    //sess->type = sess_type;
+    sess->session_id = sess_data->session_id;
 
     vaccelrt->sessions[index] = sess;
 
-    return index;
+    return sess->session_id;
 }
 
 static int acceldev_vaccelrt_destroy_session(
@@ -108,20 +122,23 @@ static int acceldev_vaccelrt_destroy_session(
     AccelDevBackendVaccelRT *vaccelrt =
                       ACCELDEV_BACKEND_VACCELRT(ab);
     AccelDevBackendVaccelRTSession *sess;
+    int index, ret;
 
-    if (sess_id >= MAX_NUM_SESSIONS ||
-              vaccelrt->sessions[sess_id] == NULL) {
-        error_setg(errp, "Cannot find a valid session id: %" PRIu32 "",
+    index = acceldev_vaccelrt_get_session_index_by_id(vaccelrt, sess_id);
+    if (index < 0) {
+        error_setg(errp, "Cannot find a valid session with id: %" PRIu32 "",
                    sess_id);
         return -VIRTIO_ACCEL_INVSESS;
     }
-    sess = vaccelrt->sessions[sess_id];
+    sess = vaccelrt->sessions[index];
 
-    vaccel_sess_free((struct vaccel_session *)sess->opaque);
+    ret = vaccel_sess_free((struct vaccel_session *)sess->opaque);
+    if (ret != VACCEL_OK)
+        return -VIRTIO_ACCEL_ERR;
 
     g_free(sess->opaque);
     g_free(sess);
-    vaccelrt->sessions[sess_id] = NULL;
+    vaccelrt->sessions[index] = NULL;
 
     return VIRTIO_ACCEL_OK;
 }
@@ -174,21 +191,21 @@ static int acceldev_vaccelrt_operation(
     AccelDevBackendVaccelRT *vaccelrt =
                       ACCELDEV_BACKEND_VACCELRT(ab);
     AccelDevBackendVaccelRTSession *sess;
-    int ret;
+    int index, ret;
 
-    if (info->sess_id >= MAX_NUM_SESSIONS ||
-              vaccelrt->sessions[info->sess_id] == NULL) {
-        error_setg(errp, "Cannot find a valid session id: %" PRIu32 "",
+    index = acceldev_vaccelrt_get_session_index_by_id(vaccelrt, info->sess_id);
+    if (index < 0) {
+        error_setg(errp, "Cannot find a valid session with id: %" PRIu32 "",
                    info->sess_id);
         return -VIRTIO_ACCEL_INVSESS;
     }
+    sess = vaccelrt->sessions[index];
 
     if (info->op.out_nr < 1) {
         error_setg(errp, "VaccelRT op requires at least 1 out argument (got %u)",
                 info->op.out_nr);
         return -VIRTIO_ACCEL_ERR;
     }
-    sess = vaccelrt->sessions[info->sess_id];
 
     ret = _acceldev_vaccelrt_operation(sess->opaque, info);
 
