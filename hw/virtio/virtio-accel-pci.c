@@ -40,7 +40,9 @@ static void virtio_accel_pci_realize(VirtIOPCIProxy *vpci_dev, Error **errp)
     }
 
     qdev_set_parent_bus(vdev, BUS(&vpci_dev->bus));
-    virtio_pci_force_virtio_1(vpci_dev);
+    //virtio_pci_force_virtio_1(vpci_dev);
+    virtio_pci_disable_modern(vpci_dev);
+    virtio_pci_legacy(vpci_dev);
     object_property_set_bool(OBJECT(vdev), true, "realized", errp);
     object_property_set_link(OBJECT(vaccel),
                  OBJECT(vaccel->vdev.conf.runtime), "runtime",
@@ -56,6 +58,9 @@ static void virtio_accel_pci_class_init(ObjectClass *klass, void *data)
     k->realize = virtio_accel_pci_realize;
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
     device_class_set_props(dc, virtio_accel_pci_properties);
+    pcidev_k->vendor_id = PCI_VENDOR_ID_REDHAT_QUMRANET;
+    pcidev_k->device_id = 0x1015;
+    pcidev_k->revision = VIRTIO_PCI_ABI_VERSION;
     pcidev_k->class_id = PCI_CLASS_OTHERS;
 }
 
