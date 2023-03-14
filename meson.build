@@ -2046,11 +2046,6 @@ if not get_option('libdw').auto() or \
                        required: get_option('libdw'))
 endif
 
-# libvaccel
-vaccel = cc.find_library('vaccel', has_headers: ['vaccel.h'],
-                            required: get_option('vaccel'),
-                            kwargs: static_kwargs)
-
 #################
 # config-host.h #
 #################
@@ -2337,7 +2332,6 @@ if xen.found()
     ('0' + xen_version[2]).substring(-2)
   config_host_data.set('CONFIG_XEN_CTRL_INTERFACE_VERSION', xen_ctrl_version)
 endif
-config_host_data.set('CONFIG_VACCEL', vaccel.found())
 config_host_data.set('QEMU_VERSION', '"@0@"'.format(meson.project_version()))
 config_host_data.set('QEMU_VERSION_MAJOR', meson.project_version().split('.')[0])
 config_host_data.set('QEMU_VERSION_MINOR', meson.project_version().split('.')[1])
@@ -3216,6 +3210,10 @@ if have_libvduse
   libvduse = libvduse_proj.get_variable('libvduse_dep')
 endif
 
+vaccel_sp = subproject('vaccel')
+vaccel = vaccel_sp.get_variable('vaccel_lib')
+config_host_data.set('CONFIG_VACCEL', vaccel.found())
+
 #####################
 # Generated sources #
 #####################
@@ -3781,6 +3779,11 @@ libhwcore = static_library('hwcore', sources: hwcore_ss.sources() + genh,
                            build_by_default: false)
 hwcore = declare_dependency(link_whole: libhwcore)
 common_ss.add(hwcore)
+
+if vaccel.found()
+  specific_ss.add_all(vaccel_sp.get_variable('vaccel_virtio_ss'))
+  system_ss.add_all(vaccel_sp.get_variable('vaccel_ss'))
+endif
 
 ###########
 # Targets #

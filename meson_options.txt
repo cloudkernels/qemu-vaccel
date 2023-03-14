@@ -301,7 +301,7 @@ option('virtfs', type: 'feature', value: 'auto',
        description: 'virtio-9p support')
 option('virtfs_proxy_helper', type: 'feature', value: 'auto',
        description: 'virtio-9p proxy helper support')
-option('vaccel', type: 'feature', value: 'auto',
+option('vaccel', type: 'feature', value: 'auto', yield: true,
        description: 'vAccel support')
 option('libvduse', type: 'feature', value: 'auto',
        description: 'build VDUSE Library')
