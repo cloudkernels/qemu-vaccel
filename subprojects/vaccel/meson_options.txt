@@ -1,0 +1,2 @@
+option('vaccel', type: 'feature', value: 'auto', yield: true,
+       description: 'vAccel support')

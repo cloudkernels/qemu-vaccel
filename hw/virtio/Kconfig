@@ -35,11 +35,6 @@ config VIRTIO_CRYPTO
     default y
     depends on VIRTIO
 
-config VIRTIO_ACCEL
-    bool
-    default y
-    depends on VIRTIO
-
 config VIRTIO_PMEM_SUPPORTED
     bool
 
