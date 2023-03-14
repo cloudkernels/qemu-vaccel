@@ -1,10 +1,10 @@
 #ifndef _QEMU_VIRTIO_ACCEL_H
 #define _QEMU_VIRTIO_ACCEL_H
 
-#include "standard-headers/linux/virtio_accel.h"
+#include "../../standard-headers/linux/virtio_accel.h"
 #include "hw/virtio/virtio.h"
 #include "system/iothread.h"
-#include "system/acceldev.h"
+#include "../../system/acceldev.h"
 
 
 #define DEBUG_VIRTIO_ACCEL 0

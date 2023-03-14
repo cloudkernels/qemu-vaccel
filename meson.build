@@ -2247,11 +2247,6 @@ if not get_option('libdw').auto() or \
                        required: get_option('libdw'))
 endif
 
-# libvaccel
-vaccel = cc.find_library('vaccel', has_headers: ['vaccel.h'],
-                            required: get_option('vaccel'),
-                            kwargs: static_kwargs)
-
 #################
 # config-host.h #
 #################
@@ -2552,7 +2547,6 @@ if xen.found()
     ('0' + xen_version[2]).substring(-2)
   config_host_data.set('CONFIG_XEN_CTRL_INTERFACE_VERSION', xen_ctrl_version)
 endif
-config_host_data.set('CONFIG_VACCEL', vaccel.found())
 config_host_data.set('QEMU_VERSION', '"@0@"'.format(meson.project_version()))
 config_host_data.set('QEMU_VERSION_MAJOR', meson.project_version().split('.')[0])
 config_host_data.set('QEMU_VERSION_MINOR', meson.project_version().split('.')[1])
@@ -3455,6 +3449,10 @@ if have_libvduse
   libvduse = libvduse_proj.get_variable('libvduse_dep')
 endif
 
+vaccel_sp = subproject('vaccel')
+vaccel = vaccel_sp.get_variable('vaccel_lib')
+config_host_data.set('CONFIG_VACCEL', vaccel.found())
+
 #####################
 # Generated sources #
 #####################
@@ -4086,6 +4084,11 @@ libaudio = static_library('qemuaudio', audio_ss.sources() + genh,
 
 audio = declare_dependency(objects: libaudio.extract_all_objects(recursive: false),
                            dependencies: [audio_ss.dependencies(), qom])
+
+if vaccel.found()
+  specific_ss.add_all(vaccel_sp.get_variable('vaccel_virtio_ss'))
+  system_ss.add_all(vaccel_sp.get_variable('vaccel_ss'))
+endif
 
 ###########
 # Targets #

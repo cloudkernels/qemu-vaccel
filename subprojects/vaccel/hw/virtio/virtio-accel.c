@@ -6,10 +6,10 @@
 #include "qemu/error-report.h"
 
 #include "hw/virtio/virtio.h"
-#include "hw/virtio/virtio-accel.h"
+#include "../../include/hw/virtio/virtio-accel.h"
 #include "hw/qdev-properties.h"
 #include "hw/virtio/virtio-access.h"
-#include "standard-headers/linux/virtio_ids.h"
+#include "../../include/standard-headers/linux/virtio_ids.h"
 
 #define VIRTIO_ACCEL_VM_VERSION 1
 
