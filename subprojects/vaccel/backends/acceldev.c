@@ -1,10 +1,10 @@
 #include "qemu/osdep.h"
-#include "sysemu/acceldev.h"
+#include "../include/sysemu/acceldev.h"
 #include "qapi/error.h"
 #include "qapi/visitor.h"
 #include "qemu/config-file.h"
 #include "qom/object_interfaces.h"
-#include "hw/virtio/virtio-accel.h"
+#include "../include/hw/virtio/virtio-accel.h"
 
 
 static QTAILQ_HEAD(, AccelDevBackendClient) accel_clients;
@@ -86,7 +86,7 @@ int acceldev_backend_operation(
     if (abc->do_op) {
         return abc->do_op(ab, op_info, queue_index, errp);
 	}
-    
+
 	return -VIRTIO_ACCEL_ERR;
 }
 
