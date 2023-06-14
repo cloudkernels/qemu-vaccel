@@ -12,6 +12,13 @@ vaccel_virtio_ss = ss.source_set()
 vaccel_ss = ss.source_set()
 
 if vaccel_lib.found()
-  vaccel_virtio_ss.add([files('hw/virtio/virtio-accel.c'), files('hw/virtio/virtio-accel-pci.c')])
-  vaccel_ss.add([vaccel_lib, files('backends/acceldev.c'), files('backends/acceldev-vaccelrt.c')])
+  vaccel_virtio_ss.add([
+    files('hw/virtio/virtio-accel.c'),
+    files('hw/virtio/virtio-accel-pci.c')
+  ])
+  vaccel_ss.add([
+    vaccel_lib,
+    files('backends/acceldev.c'),
+    files('backends/acceldev-vaccelrt.c')
+  ])
 endif
