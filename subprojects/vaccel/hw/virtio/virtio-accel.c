@@ -11,6 +11,7 @@
 #include "hw/virtio/virtio-access.h"
 #include "../../include/standard-headers/linux/virtio_ids.h"
 
+
 #define VIRTIO_ACCEL_VM_VERSION 1
 
 static void virtio_accel_init_request(VirtIOAccelReq *req,
@@ -30,7 +31,8 @@ static void virtio_accel_init_request(VirtIOAccelReq *req,
 static void virtio_accel_free_request(VirtIOAccelReq *req)
 {
     if (req->hdr.op_type == VIRTIO_ACCEL_CREATE_SESSION ||
-            req->hdr.op_type == VIRTIO_ACCEL_DO_OP) {
+            req->hdr.op_type == VIRTIO_ACCEL_DO_OP ||
+            req->hdr.op_type == VIRTIO_ACCEL_GET_TIMERS) {
         if (req->hdr.op.in)
             g_free(req->hdr.op.in);
         if (req->hdr.op.out)
@@ -91,10 +93,10 @@ virtio_accel_vaccel_create_session(VirtIOAccelReq *req)
     if (sess_id >= 0) {
         req->hdr.sess_id = (uint32_t)sess_id;
         for (int i = 0; i < h->op.in_nr; i++) {
-                r = iov_from_buf(req->in_iov, req->in_niov, 0, info.op.in[i].buf,
-                                info.op.in[i].len);
-                if (unlikely(r != info.op.in[i].len)) {
-                    virtio_error(vdev, "virtio-accel in[%d] data incorrect", i);
+            r = iov_from_buf(req->in_iov, req->in_niov, 0, info.op.in[i].buf,
+                            info.op.in[i].len);
+            if (unlikely(r != info.op.in[i].len)) {
+                virtio_error(vdev, "virtio-accel in[%d] data incorrect", i);
             return -VIRTIO_ACCEL_ERR;
         }
 
@@ -152,6 +154,8 @@ virtio_accel_vaccel_do_op(VirtIOAccelReq *req)
     size_t r;
     Error *local_err = NULL;
 
+    acceldev_backend_timer_start(vaccel->runtime, h->sess_id, "do op",
+                                 queue_index, &local_err);
     info.op_type = h->op_type;
     info.sess_id = h->sess_id;
     info.op.in = (AccelDevBackendArg *)h->op.in;
@@ -159,19 +163,68 @@ virtio_accel_vaccel_do_op(VirtIOAccelReq *req)
     info.op.in_nr = h->op.in_nr;
     info.op.out_nr = h->op.out_nr;
     ret = acceldev_backend_operation(vaccel->runtime, &info, queue_index,
-                                        &local_err);
+                                     &local_err);
 
     if (ret >= 0) {
         for (int i = 0; i < h->op.in_nr; i++) {
-                r = iov_from_buf(req->in_iov, req->in_niov, 0, info.op.in[i].buf,
-                                info.op.in[i].len);
-                if (unlikely(r != info.op.in[i].len)) {
-                    virtio_error(vdev, "virtio-accel in[%d] data incorrect", i);
-            return -VIRTIO_ACCEL_ERR;
+            r = iov_from_buf(req->in_iov, req->in_niov, 0, info.op.in[i].buf,
+                            info.op.in[i].len);
+            if (unlikely(r != info.op.in[i].len)) {
+                virtio_error(vdev, "virtio-accel in[%d] data incorrect", i);
+                return -VIRTIO_ACCEL_ERR;
+            }
+
+            iov_discard_front(&req->in_iov, &req->in_niov,
+                            info.op.in[i].len);
         }
 
-                iov_discard_front(&req->in_iov, &req->in_niov,
-                                info.op.in[i].len);
+        VADPRINTF("runtime op session_id=%" PRIu32 " successful\n",
+                info.sess_id);
+    } else {
+        if (local_err) {
+            error_report_err(local_err);
+        }
+    }
+
+    acceldev_backend_timer_stop(vaccel->runtime, h->sess_id, "do op",
+                                 queue_index, &local_err);
+
+    return ret;
+}
+
+static int
+virtio_accel_vaccel_get_timers(VirtIOAccelReq *req)
+{
+    VirtIOAccel *vaccel = req->vaccel;
+    VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
+    struct virtio_accel_hdr *h = &req->hdr;
+    int queue_index = virtio_get_queue_index(req->vq);
+    AccelDevBackendOpInfo info;
+    int ret = -VIRTIO_ACCEL_ERR;
+    size_t r;
+    Error *local_err = NULL;
+
+    info.op_type = h->op_type;
+    info.sess_id = h->sess_id;
+    info.op.in = (AccelDevBackendArg *)h->op.in;
+    info.op.out = (AccelDevBackendArg *)h->op.out;
+    info.op.in_nr = h->op.in_nr;
+    info.op.out_nr = h->op.out_nr;
+
+    ret = acceldev_backend_get_timers(vaccel->runtime, &info, queue_index,
+                                     &local_err);
+
+    if (ret >= 0) {
+        for (int i = 0; i < h->op.in_nr; i++) {
+            r = iov_from_buf(req->in_iov, req->in_niov, 0, info.op.in[i].buf,
+                            info.op.in[i].len);
+            if (unlikely(r != info.op.in[i].len)) {
+                virtio_error(vdev, "virtio-accel in[%d] data incorrect", i);
+                return -VIRTIO_ACCEL_ERR;
+            }
+
+            iov_discard_front(&req->in_iov, &req->in_niov,
+                            info.op.in[i].len);
         }
 
         VADPRINTF("runtime op session_id=%" PRIu32 " successful\n",
@@ -199,15 +252,13 @@ virtio_accel_handle_req_header_data(VirtIOAccelReq *req)
     switch (h->op_type) {
     case VIRTIO_ACCEL_CREATE_SESSION:
     case VIRTIO_ACCEL_DO_OP:
-        h->op.in_nr = virtio_ldl_p(
-                vdev, &h->op.in_nr);
-        h->op.out_nr = virtio_ldl_p(
-                vdev, &h->op.out_nr);
-        // TODO: free g_new0/g_malloc0'ed buffers
+    case VIRTIO_ACCEL_GET_TIMERS:
+        h->op.in_nr = virtio_ldl_p(vdev, &h->op.in_nr);
+        h->op.out_nr = virtio_ldl_p(vdev, &h->op.out_nr);
         if (h->op.out_nr > 0) {
-            gop_arg = g_new0(AccelDevBackendArg,
-                                    h->op.out_nr);
+            gop_arg = g_new0(AccelDevBackendArg, h->op.out_nr);
             for (i = 0; i < h->op.out_nr; i++) {
+                gop_arg[i].len = h->op.out[i].len;
                 gop_arg[i].buf = g_malloc0(h->op.out[i].len);
                 r = iov_to_buf(req->out_iov, req->out_niov, 0, gop_arg[i].buf,
                                 h->op.out[i].len);
@@ -215,7 +266,6 @@ virtio_accel_handle_req_header_data(VirtIOAccelReq *req)
                     virtio_error(vdev, "virtio-accel gop_arg[%d] too short", i);
                     return;
                 }
-                gop_arg[i].len = h->op.out[i].len;
                 iov_discard_front(&req->out_iov, &req->out_niov,
                                 h->op.out[i].len);
             }
@@ -223,9 +273,18 @@ virtio_accel_handle_req_header_data(VirtIOAccelReq *req)
         }
         if (h->op.in_nr > 0) {
             gop_arg = g_new0(AccelDevBackendArg, h->op.in_nr);
+            int offset = 0;
             for (i = 0; i < h->op.in_nr; i++) {
-                gop_arg[i].buf = g_malloc0(h->op.in[i].len);
                 gop_arg[i].len = h->op.in[i].len;
+                gop_arg[i].buf = g_malloc0(h->op.in[i].len);
+                r = iov_to_buf(req->in_iov, req->in_niov, offset, gop_arg[i].buf,
+                                h->op.in[i].len);
+                if (unlikely(r !=  h->op.in[i].len)) {
+                    virtio_error(vdev, "virtio-accel gop_arg[%d] too short", i);
+                    return;
+                }
+                // don't discard these yet, we need to write them first
+                offset += h->op.in[i].len;
             }
             h->op.in = (struct virtio_accel_arg *)gop_arg;
         }
@@ -248,6 +307,8 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
     struct iovec *in_iov, *out_iov;
     unsigned int in_niov, out_niov;
     uint32_t status = VIRTIO_ACCEL_ERR;
+    int queue_index = virtio_get_queue_index(req->vq);
+    Error *local_err = NULL;
 
     if (elem->out_num < 1 || elem->in_num < 1) {
         virtio_error(vdev, "virtio-accel request missing headers");
@@ -267,13 +328,22 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
     }
     iov_discard_front(&out_iov, &out_niov, sizeof(req->hdr));
 
+    uint32_t sess_id = virtio_ldl_p(vdev, &req->hdr.sess_id);
+    uint32_t op_type = virtio_ldl_p(vdev, &req->hdr.op_type);
+    if (op_type == VIRTIO_ACCEL_DO_OP) {
+        acceldev_backend_timer_start(vaccel->runtime, sess_id, "prepare header",
+                                     queue_index, &local_err);
+    }
+
     if (req->hdr.op.out_nr > 0) {
         req->hdr.op.out = out_iov[0].iov_base;
-        iov_discard_front(&out_iov, &out_niov, req->hdr.op.out_nr * sizeof(*req->hdr.op.out));
+        iov_discard_front(&out_iov, &out_niov,
+                req->hdr.op.out_nr * sizeof(*req->hdr.op.out));
     }
     if (req->hdr.op.in_nr > 0) {
         req->hdr.op.in = out_iov[0].iov_base;
-        iov_discard_front(&out_iov, &out_niov, req->hdr.op.in_nr * sizeof(*req->hdr.op.in));
+        iov_discard_front(&out_iov, &out_niov,
+                req->hdr.op.in_nr * sizeof(*req->hdr.op.in));
     }
 
     if (in_iov[in_niov - 1].iov_len !=
@@ -294,39 +364,40 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
     req->out_niov = out_niov;
 
     virtio_accel_handle_req_header_data(req);
+
+    if (op_type == VIRTIO_ACCEL_DO_OP) {
+        acceldev_backend_timer_stop(vaccel->runtime, sess_id, "prepare header",
+                                     queue_index, &local_err);
+    }
+
     VADPRINTF("handle request op=%u\n", req->hdr.op_type);
     switch (req->hdr.op_type) {
     case VIRTIO_ACCEL_CREATE_SESSION:
+        ret = virtio_accel_vaccel_create_session(req);
+        if (ret >= 0)
+            virtio_stq_p(vdev, in_iov->iov_base, req->hdr.sess_id);
+        break;
     case VIRTIO_ACCEL_DO_OP:
-        if (req->hdr.op_type == VIRTIO_ACCEL_CREATE_SESSION) {
-            ret = virtio_accel_vaccel_create_session(req);
-            if (ret >= 0)
-                virtio_stq_p(vdev, in_iov->iov_base, req->hdr.sess_id);
-        } else {
-            ret = virtio_accel_vaccel_do_op(req);
-        }
-        /* Serious errors, need to reset virtio accel device */
-        if (ret == -EFAULT)
-            return -1;
-        
-        virtio_accel_complete_request(req, ret);
-        virtio_accel_free_request(req);
+        ret = virtio_accel_vaccel_do_op(req);
         break;
     case VIRTIO_ACCEL_DESTROY_SESSION:
         ret = virtio_accel_vaccel_destroy_session(req);
-        /* Serious errors, need to reset virtio accel device */
-        if (ret == -EFAULT)
-            return -1;
-
-        virtio_accel_complete_request(req, ret);
-        virtio_accel_free_request(req);
+        break;
+    case VIRTIO_ACCEL_GET_TIMERS:
+        ret = virtio_accel_vaccel_get_timers(req);
         break;
     default:
         error_report("virtio-accel unsupported opcode: %u",
                      req->hdr.op_type);
-        virtio_accel_complete_request(req, VIRTIO_ACCEL_NOTSUPP);
-        virtio_accel_free_request(req);
+        ret = VIRTIO_ACCEL_NOTSUPP;
+        break;
     }
+    /* Serious errors, need to reset virtio accel device */
+    if (ret == -EFAULT)
+        return -1;
+
+    virtio_accel_complete_request(req, ret);
+    virtio_accel_free_request(req);
 
     return 0;
 }
