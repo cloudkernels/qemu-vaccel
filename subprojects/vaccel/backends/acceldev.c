@@ -9,7 +9,6 @@
 
 static QTAILQ_HEAD(, AccelDevBackendClient) accel_clients;
 
-
 AccelDevBackendClient *
 acceldev_backend_new_client(const char *model, const char *name)
 {
@@ -61,9 +60,9 @@ int64_t acceldev_backend_create_session(
 }
 
 int acceldev_backend_destroy_session(
-           AccelDevBackend *ab,
-           uint64_t session_id,
-           uint32_t queue_index, Error **errp)
+                 AccelDevBackend *ab,
+                 uint32_t session_id,
+                 uint32_t queue_index, Error **errp)
 {
     AccelDevBackendClass *abc =
                       ACCELDEV_BACKEND_GET_CLASS(ab);
@@ -80,14 +79,61 @@ int acceldev_backend_operation(
                  AccelDevBackendOpInfo *op_info,
                  uint32_t queue_index, Error **errp)
 {
-	AccelDevBackendClass *abc =
+    AccelDevBackendClass *abc =
                       ACCELDEV_BACKEND_GET_CLASS(ab);
 
     if (abc->do_op) {
         return abc->do_op(ab, op_info, queue_index, errp);
-	}
+    }
 
-	return -VIRTIO_ACCEL_ERR;
+    return -VIRTIO_ACCEL_ERR;
+}
+
+int acceldev_backend_timer_start(
+                 AccelDevBackend *ab,
+                 uint32_t session_id,
+                 const char *name,
+                 uint32_t queue_index, Error **errp)
+{
+    AccelDevBackendClass *abc =
+                      ACCELDEV_BACKEND_GET_CLASS(ab);
+
+    if (abc->timer_start) {
+        return abc->timer_start(ab, session_id, name, queue_index, errp);
+    }
+
+    return -VIRTIO_ACCEL_ERR;
+}
+
+int acceldev_backend_timer_stop(
+                 AccelDevBackend *ab,
+                 uint32_t session_id,
+                 const char *name,
+                 uint32_t queue_index, Error **errp)
+{
+    AccelDevBackendClass *abc =
+                      ACCELDEV_BACKEND_GET_CLASS(ab);
+
+    if (abc->timer_stop) {
+        return abc->timer_stop(ab, session_id, name, queue_index, errp);
+    }
+
+    return -VIRTIO_ACCEL_ERR;
+}
+
+int acceldev_backend_get_timers(
+                 AccelDevBackend *ab,
+                 AccelDevBackendOpInfo *op_info,
+                 uint32_t queue_index, Error **errp)
+{
+    AccelDevBackendClass *abc =
+                      ACCELDEV_BACKEND_GET_CLASS(ab);
+
+    if (abc->do_op) {
+        return abc->timers_get(ab, op_info, queue_index, errp);
+    }
+
+    return -VIRTIO_ACCEL_ERR;
 }
 
 static void
@@ -108,7 +154,7 @@ acceldev_backend_set_queues(Object *obj, Visitor *v, const char *name,
     uint32_t value;
 
     if (!visit_type_uint32(v, name, &value, errp))
-			return;
+        return;
 
     if (!value) {
         error_setg(errp, "Property '%s.%s' doesn't take value '%"
