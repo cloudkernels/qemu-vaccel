@@ -5,8 +5,14 @@ project('vaccel', 'c',
 cc = meson.get_compiler('c')
 ss = import('sourceset')
 
-vaccel_lib = cc.find_library('vaccel', has_headers: ['vaccel.h'],
-                             required: get_option('vaccel'))
+keyval = import('keyval')
+config_host = keyval.load(meson.build_root() / 'config-host.mak')
+enable_static = 'CONFIG_STATIC' in config_host
+if enable_static
+  vaccel_lib = dependency('vaccel', static: true)
+else
+  vaccel_lib = dependency('vaccel')
+endif
 
 vaccel_virtio_ss = ss.source_set()
 vaccel_ss = ss.source_set()
