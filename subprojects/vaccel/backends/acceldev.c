@@ -61,14 +61,14 @@ int64_t acceldev_backend_create_session(
 
 int acceldev_backend_destroy_session(
                  AccelDevBackend *ab,
-                 uint32_t session_id,
+                 int64_t sess_id,
                  uint32_t queue_index, Error **errp)
 {
     AccelDevBackendClass *abc =
                       ACCELDEV_BACKEND_GET_CLASS(ab);
 
     if (abc->destroy_session) {
-        return abc->destroy_session(ab, session_id, queue_index, errp);
+        return abc->destroy_session(ab, sess_id, queue_index, errp);
     }
 
     return -VIRTIO_ACCEL_ERR;
@@ -91,7 +91,7 @@ int acceldev_backend_operation(
 
 int acceldev_backend_timer_start(
                  AccelDevBackend *ab,
-                 uint32_t session_id,
+                 int64_t sess_id,
                  const char *name,
                  uint32_t queue_index, Error **errp)
 {
@@ -99,7 +99,7 @@ int acceldev_backend_timer_start(
                       ACCELDEV_BACKEND_GET_CLASS(ab);
 
     if (abc->timer_start) {
-        return abc->timer_start(ab, session_id, name, queue_index, errp);
+        return abc->timer_start(ab, sess_id, name, queue_index, errp);
     }
 
     return -VIRTIO_ACCEL_ERR;
@@ -107,7 +107,7 @@ int acceldev_backend_timer_start(
 
 int acceldev_backend_timer_stop(
                  AccelDevBackend *ab,
-                 uint32_t session_id,
+                 int64_t sess_id,
                  const char *name,
                  uint32_t queue_index, Error **errp)
 {
@@ -115,7 +115,7 @@ int acceldev_backend_timer_stop(
                       ACCELDEV_BACKEND_GET_CLASS(ab);
 
     if (abc->timer_stop) {
-        return abc->timer_stop(ab, session_id, name, queue_index, errp);
+        return abc->timer_stop(ab, sess_id, name, queue_index, errp);
     }
 
     return -VIRTIO_ACCEL_ERR;
@@ -216,7 +216,7 @@ static void acceldev_backend_finalize(Object *obj)
 }
 
 static void
-acceldev_backend_class_init(ObjectClass *oc, void *data)
+acceldev_backend_class_init(ObjectClass *oc, const void *data)
 {
     UserCreatableClass *ucc = USER_CREATABLE_CLASS(oc);
 
@@ -238,7 +238,7 @@ static const TypeInfo acceldev_backend_info = {
     .instance_finalize = acceldev_backend_finalize,
     .class_size = sizeof(AccelDevBackendClass),
     .class_init = acceldev_backend_class_init,
-    .interfaces = (InterfaceInfo[]) {
+    .interfaces = (const InterfaceInfo[]) {
         { TYPE_USER_CREATABLE },
         { }
     }

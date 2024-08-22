@@ -36,7 +36,7 @@ typedef struct AccelDevBackendSessionInfo {
 
 typedef struct AccelDevBackendOpInfo {
     uint32_t op_type;
-    uint32_t sess_id;
+    int64_t sess_id;
     AccelDevBackendInfo op;
 } AccelDevBackendOpInfo;
 
@@ -53,7 +53,7 @@ typedef struct AccelDevBackendClass {
                  uint32_t queue_index, Error **errp);
     int (*destroy_session)(
                  AccelDevBackend *ab,
-                 uint32_t session_id,
+                 int64_t sess_id,
                  uint32_t queue_index, Error **errp);
     int (*do_op)(
                  AccelDevBackend *ab,
@@ -61,12 +61,12 @@ typedef struct AccelDevBackendClass {
                  uint32_t queue_index, Error **errp);
     int (*timer_start)(
                  AccelDevBackend *ab,
-                 uint32_t session_id,
+                 int64_t sess_id,
                  const char *name,
                  uint32_t queue_index, Error **errp);
     int (*timer_stop)(
                  AccelDevBackend *ab,
-                 uint32_t session_id,
+                 int64_t sess_id,
                  const char *name,
                  uint32_t queue_index, Error **errp);
     int (*timers_get)(
@@ -164,7 +164,7 @@ int64_t acceldev_backend_create_session(
 /**
  * acceldev_backend_destroy_session:
  * @ab: the acceldev backend object
- * @session_id: the session id
+ * @sess_id: the session id
  * @queue_index: queue index of acceldev backend client
  * @errp: pointer to a NULL-initialized error object
  *
@@ -176,7 +176,7 @@ int64_t acceldev_backend_create_session(
  */
 int acceldev_backend_destroy_session(
            AccelDevBackend *ab,
-           uint32_t session_id,
+           int64_t sess_id,
            uint32_t queue_index, Error **errp);
 
 /**
@@ -199,7 +199,7 @@ int acceldev_backend_operation(
 /**
  * acceldev_backend_timer_start:
  * @ab: the acceldev backend object
- * @session_id: the session id
+ * @sess_id: the session id
  * @name: the timer name
  * @queue_index: queue index of acceldev backend client
  * @errp: pointer to a NULL-initialized error object
@@ -211,14 +211,14 @@ int acceldev_backend_operation(
  */
 int acceldev_backend_timer_start(
                  AccelDevBackend *ab,
-                 uint32_t session_id,
+                 int64_t sess_id,
                  const char *name,
                  uint32_t queue_index, Error **errp);
 
 /**
  * acceldev_backend_timer_stop:
  * @ab: the acceldev backend object
- * @session_id: the session id
+ * @sess_id: the session id
  * @name: the timer name
  * @queue_index: queue index of acceldev backend client
  * @errp: pointer to a NULL-initialized error object
@@ -230,7 +230,7 @@ int acceldev_backend_timer_start(
  */
 int acceldev_backend_timer_stop(
                  AccelDevBackend *ab,
-                 uint32_t session_id,
+                 int64_t sess_id,
                  const char *name,
                  uint32_t queue_index, Error **errp);
 
