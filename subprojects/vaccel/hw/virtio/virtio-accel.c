@@ -178,7 +178,7 @@ virtio_accel_vaccel_do_op(VirtIOAccelReq *req)
                             info.op.in[i].len);
         }
 
-        VADPRINTF("runtime op session_id=%" PRIu32 " successful\n",
+        VADPRINTF("runtime op session_id=%" PRId64 " successful\n",
                 info.sess_id);
     } else {
         if (local_err) {
@@ -227,7 +227,7 @@ virtio_accel_vaccel_get_timers(VirtIOAccelReq *req)
                             info.op.in[i].len);
         }
 
-        VADPRINTF("runtime op session_id=%" PRIu32 " successful\n",
+        VADPRINTF("runtime op session_id=%" PRId64 " successful\n",
                 info.sess_id);
     } else {
         if (local_err) {
@@ -573,11 +573,10 @@ static const VMStateDescription vmstate_virtio_accel = {
     },
 };
 
-static Property virtio_accel_properties[] = {
+static const Property virtio_accel_properties[] = {
 
     DEFINE_PROP_LINK("runtime", VirtIOAccel, conf.runtime,
                      TYPE_ACCELDEV_BACKEND, AccelDevBackend *),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void virtio_accel_get_config(VirtIODevice *vdev, uint8_t *config)
@@ -599,7 +598,7 @@ static void virtio_accel_get_config(VirtIODevice *vdev, uint8_t *config)
     memcpy(config, &cfg, va->config_size);
 }
 
-static void virtio_accel_class_init(ObjectClass *klass, void *data)
+static void virtio_accel_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     VirtioDeviceClass *vdc = VIRTIO_DEVICE_CLASS(klass);

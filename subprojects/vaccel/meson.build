@@ -6,7 +6,7 @@ cc = meson.get_compiler('c')
 ss = import('sourceset')
 
 keyval = import('keyval')
-config_host = keyval.load(meson.build_root() / 'config-host.mak')
+config_host = keyval.load(meson.global_build_root() / 'config-host.mak')
 enable_static = 'CONFIG_STATIC' in config_host
 if enable_static
   vaccel_lib = dependency('vaccel', static: true)
@@ -25,6 +25,6 @@ if vaccel_lib.found()
   vaccel_ss.add([
     vaccel_lib,
     files('backends/acceldev.c'),
-    files('backends/acceldev-vaccelrt.c')
+    files('backends/acceldev-vaccel.c')
   ])
 endif
