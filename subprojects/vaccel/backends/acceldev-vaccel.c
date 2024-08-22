@@ -10,7 +10,7 @@
 /**
  * @TYPE_ACCELDEV_BACKEND_VACCELRT:
  */
-#define TYPE_ACCELDEV_BACKEND_VACCELRT "acceldev-backend-vaccelrt"
+#define TYPE_ACCELDEV_BACKEND_VACCELRT "acceldev-backend-vaccel"
 
 OBJECT_DECLARE_SIMPLE_TYPE(AccelDevBackendVaccelRT, ACCELDEV_BACKEND_VACCELRT)
 
@@ -65,7 +65,7 @@ static void timers_del(AccelDevBackendVaccelRTSession *sess)
     }
 }
 
-static void acceldev_vaccelrt_init(
+static void acceldev_vaccel_init(
              AccelDevBackend *ab, Error **errp)
 {
     /* Only support one queue */
@@ -74,12 +74,12 @@ static void acceldev_vaccelrt_init(
 
     if (queues != 1) {
         error_setg(errp,
-                  "Only support one queue in acceldev-vaccelrt backend");
+                  "Only support one queue in acceldev-vaccel backend");
         return;
     }
 
-    c = acceldev_backend_new_client("acceldev-vaccelrt", NULL);
-    c->info_str = g_strdup_printf("acceldev-vaccelrt0");
+    c = acceldev_backend_new_client("acceldev-vaccel", NULL);
+    c->info_str = g_strdup_printf("acceldev-vaccel0");
     c->queue_index = 0;
     ab->conf.peers.ccs[0] = c;
 
@@ -90,16 +90,16 @@ static void acceldev_vaccelrt_init(
 
     acceldev_backend_set_ready(ab, true);
 
-    AccelDevBackendVaccelRT *vaccelrt = ACCELDEV_BACKEND_VACCELRT(ab);
-    QTAILQ_INIT(&vaccelrt->sessions);
+    AccelDevBackendVaccelRT *vaccel = ACCELDEV_BACKEND_VACCELRT(ab);
+    QTAILQ_INIT(&vaccel->sessions);
 }
 
 static AccelDevBackendVaccelRTSession *session_get(
-                 AccelDevBackendVaccelRT *vaccelrt,
+                 AccelDevBackendVaccelRT *vaccel,
                  uint32_t session_id)
 {
     AccelDevBackendVaccelRTSession *sess, *tmp;
-    QTAILQ_FOREACH_SAFE(sess, &vaccelrt->sessions, next, tmp) {
+    QTAILQ_FOREACH_SAFE(sess, &vaccel->sessions, next, tmp) {
         if (sess->id == session_id) {
             return sess;
         }
@@ -108,7 +108,7 @@ static AccelDevBackendVaccelRTSession *session_get(
 }
 
 static AccelDevBackendVaccelRTSession *session_create_and_add(
-                AccelDevBackendVaccelRT *vaccelrt,
+                AccelDevBackendVaccelRT *vaccel,
                 void *sess_data,
                 uint32_t sess_id)
 {
@@ -118,26 +118,26 @@ static AccelDevBackendVaccelRTSession *session_create_and_add(
     sess->id = sess_id;
     QTAILQ_INIT(&sess->timers);
     sess->nr_timers = 0;
-    QTAILQ_INSERT_TAIL(&vaccelrt->sessions, sess, next);
+    QTAILQ_INSERT_TAIL(&vaccel->sessions, sess, next);
 
     return sess;
 }
 
 static void session_del(
-                AccelDevBackendVaccelRT *vaccelrt,
+                AccelDevBackendVaccelRT *vaccel,
                 AccelDevBackendVaccelRTSession *sess)
 {
-    QTAILQ_REMOVE(&vaccelrt->sessions, sess, next);
+    QTAILQ_REMOVE(&vaccel->sessions, sess, next);
     g_free(sess->opaque);
     g_free(sess);
 }
 
-static int64_t acceldev_vaccelrt_create_session(
+static int64_t acceldev_vaccel_create_session(
            AccelDevBackend *ab,
            AccelDevBackendSessionInfo *info,
            uint32_t queue_index, Error **errp)
 {
-    AccelDevBackendVaccelRT *vaccelrt = ACCELDEV_BACKEND_VACCELRT(ab);
+    AccelDevBackendVaccelRT *vaccel = ACCELDEV_BACKEND_VACCELRT(ab);
     struct vaccel_session *sess_data = NULL;
     AccelDevBackendVaccelRTSession *sess;
     int ret;
@@ -148,22 +148,22 @@ static int64_t acceldev_vaccelrt_create_session(
     if (ret != VACCEL_OK)
         return -VIRTIO_ACCEL_ERR;
 
-    sess = session_create_and_add(vaccelrt, (void *)sess_data,
+    sess = session_create_and_add(vaccel, (void *)sess_data,
                                   sess_data->session_id);
 
     return sess->id;
 }
 
-static int acceldev_vaccelrt_destroy_session(
+static int acceldev_vaccel_destroy_session(
            AccelDevBackend *ab,
            uint32_t sess_id,
            uint32_t queue_index, Error **errp)
 {
-    AccelDevBackendVaccelRT *vaccelrt = ACCELDEV_BACKEND_VACCELRT(ab);
+    AccelDevBackendVaccelRT *vaccel = ACCELDEV_BACKEND_VACCELRT(ab);
     AccelDevBackendVaccelRTSession *sess;
     int ret;
 
-    sess = session_get(vaccelrt, sess_id);
+    sess = session_get(vaccel, sess_id);
     if (!sess) {
         error_setg(errp, "Cannot find a valid session with id: %" PRIu32 "",
                    sess_id);
@@ -175,7 +175,7 @@ static int acceldev_vaccelrt_destroy_session(
         return -VIRTIO_ACCEL_ERR;
 
     timers_del(sess);
-    session_del(vaccelrt, sess);
+    session_del(vaccel, sess);
 
     return VIRTIO_ACCEL_OK;
 }
@@ -241,16 +241,16 @@ static int do_operation(
     return ret;
 }
 
-static int acceldev_vaccelrt_operation(
+static int acceldev_vaccel_operation(
                  AccelDevBackend *ab,
                  AccelDevBackendOpInfo *info,
                  uint32_t queue_index, Error **errp)
 {
-    AccelDevBackendVaccelRT *vaccelrt = ACCELDEV_BACKEND_VACCELRT(ab);
+    AccelDevBackendVaccelRT *vaccel = ACCELDEV_BACKEND_VACCELRT(ab);
     AccelDevBackendVaccelRTSession *sess;
     int ret;
 
-    sess = session_get(vaccelrt, info->sess_id);
+    sess = session_get(vaccel, info->sess_id);
     if (!sess) {
         error_setg(errp, "Cannot find a valid session with id: %" PRIu32 "",
                    info->sess_id);
@@ -258,7 +258,7 @@ static int acceldev_vaccelrt_operation(
     }
 
     if (info->op.out_nr < 1) {
-        error_setg(errp, "VaccelRT op requires at least 1 out argument (got %u)",
+        error_setg(errp, "vAccel op requires at least 1 out argument (got %u)",
                 info->op.out_nr);
         return -VIRTIO_ACCEL_ERR;
     }
@@ -271,7 +271,7 @@ static int acceldev_vaccelrt_operation(
     return VIRTIO_ACCEL_OK;
 }
 
-static int acceldev_vaccelrt_timer_start(
+static int acceldev_vaccel_timer_start(
            AccelDevBackend *ab,
            uint32_t sess_id,
            const char *name,
@@ -280,11 +280,11 @@ static int acceldev_vaccelrt_timer_start(
     if (!vaccel_prof_enabled())
         return VIRTIO_ACCEL_OK;
 
-    AccelDevBackendVaccelRT *vaccelrt = ACCELDEV_BACKEND_VACCELRT(ab);
+    AccelDevBackendVaccelRT *vaccel = ACCELDEV_BACKEND_VACCELRT(ab);
     AccelDevBackendVaccelRTSession *sess;
     int ret;
 
-    sess = session_get(vaccelrt, sess_id);
+    sess = session_get(vaccel, sess_id);
     if (!sess) {
         return -VIRTIO_ACCEL_INVSESS;
     }
@@ -307,7 +307,7 @@ static int acceldev_vaccelrt_timer_start(
     return VIRTIO_ACCEL_OK;
 }
 
-static int acceldev_vaccelrt_timer_stop(
+static int acceldev_vaccel_timer_stop(
            AccelDevBackend *ab,
            uint32_t sess_id,
            const char *name,
@@ -316,10 +316,10 @@ static int acceldev_vaccelrt_timer_stop(
     if (!vaccel_prof_enabled())
         return VIRTIO_ACCEL_OK;
 
-    AccelDevBackendVaccelRT *vaccelrt = ACCELDEV_BACKEND_VACCELRT(ab);
+    AccelDevBackendVaccelRT *vaccel = ACCELDEV_BACKEND_VACCELRT(ab);
     AccelDevBackendVaccelRTSession *sess;
 
-    sess = session_get(vaccelrt, sess_id);
+    sess = session_get(vaccel, sess_id);
     if (!sess) {
         return -VIRTIO_ACCEL_INVSESS;
     }
@@ -385,7 +385,7 @@ static int timers_acceldev_to_accel(
     return i;
 }
 
-static int acceldev_vaccelrt_get_timers(
+static int acceldev_vaccel_get_timers(
                  AccelDevBackend *ab,
                  AccelDevBackendOpInfo *info,
                  uint32_t queue_index, Error **errp)
@@ -393,11 +393,11 @@ static int acceldev_vaccelrt_get_timers(
     if (!vaccel_prof_enabled())
         return VIRTIO_ACCEL_OK;
 
-    AccelDevBackendVaccelRT *vaccelrt = ACCELDEV_BACKEND_VACCELRT(ab);
+    AccelDevBackendVaccelRT *vaccel = ACCELDEV_BACKEND_VACCELRT(ab);
     AccelDevBackendVaccelRTSession *sess;
     int ret;
 
-    sess = session_get(vaccelrt, info->sess_id);
+    sess = session_get(vaccel, info->sess_id);
     if (!sess) {
         error_setg(errp, "Cannot find a valid session with id: %" PRIu32 "",
                    info->sess_id);
@@ -406,7 +406,7 @@ static int acceldev_vaccelrt_get_timers(
 
     if (info->op.in_nr < 1) {
         error_setg(errp,
-                "vaccelrt get_timers requires at least 1 in argument (got %u)",
+                "vaccel get_timers requires at least 1 in argument (got %u)",
                 info->op.out_nr);
         return -VIRTIO_ACCEL_ERR;
     }
@@ -421,7 +421,7 @@ static int acceldev_vaccelrt_get_timers(
 
         if (info->op.in_nr < 3 + nr_timers) {
             error_setg(errp,
-                    "vaccelrt get_timers: not enough in arguments (got %u)",
+                    "vaccel get_timers: not enough in arguments (got %u)",
                     info->op.in_nr);
             return -VIRTIO_ACCEL_ERR;
         }
@@ -430,7 +430,7 @@ static int acceldev_vaccelrt_get_timers(
             (struct accel_prof_region *)info->op.in[2].buf;
         if (info->op.in[2].len < nr_timers * sizeof(*accel_timers)) {
             error_setg(errp,
-                    "vaccelrt get_timers: wrong preallocated size (got %d)",
+                    "vaccel get_timers: wrong preallocated size (got %d)",
                     info->op.in[2].len);
             return -VIRTIO_ACCEL_ERR;
         }
@@ -467,25 +467,25 @@ free:
 }
 
 static void sessions_del(
-                AccelDevBackendVaccelRT *vaccelrt,
+                AccelDevBackendVaccelRT *vaccel,
                 AccelDevBackend *ab,
                 Error **errp)
 {
     AccelDevBackendVaccelRTSession *sess, *tmp;
-    QTAILQ_FOREACH_SAFE(sess, &vaccelrt->sessions, next, tmp) {
-        acceldev_vaccelrt_destroy_session(ab, sess->id, 0, errp);
+    QTAILQ_FOREACH_SAFE(sess, &vaccel->sessions, next, tmp) {
+        acceldev_vaccel_destroy_session(ab, sess->id, 0, errp);
     }
 }
 
-static void acceldev_vaccelrt_cleanup(
+static void acceldev_vaccel_cleanup(
              AccelDevBackend *ab,
              Error **errp)
 {
-    AccelDevBackendVaccelRT *vaccelrt = ACCELDEV_BACKEND_VACCELRT(ab);
+    AccelDevBackendVaccelRT *vaccel = ACCELDEV_BACKEND_VACCELRT(ab);
     int queues = ab->conf.peers.queues;
     AccelDevBackendClient *c;
 
-    sessions_del(vaccelrt, ab, errp);
+    sessions_del(vaccel, ab, errp);
 
     for (int i = 0; i < queues; i++) {
         c = ab->conf.peers.ccs[i];
@@ -499,31 +499,31 @@ static void acceldev_vaccelrt_cleanup(
 }
 
 static void
-acceldev_vaccelrt_class_init(ObjectClass *oc, void *data)
+acceldev_vaccel_class_init(ObjectClass *oc, void *data)
 {
     AccelDevBackendClass *abc = ACCELDEV_BACKEND_CLASS(oc);
 
-    abc->init = acceldev_vaccelrt_init;
-    abc->cleanup = acceldev_vaccelrt_cleanup;
-    abc->create_session = acceldev_vaccelrt_create_session;
-    abc->destroy_session = acceldev_vaccelrt_destroy_session;
-    abc->do_op = acceldev_vaccelrt_operation;
-    abc->timer_start = acceldev_vaccelrt_timer_start;
-    abc->timer_stop = acceldev_vaccelrt_timer_stop;
-    abc->timers_get = acceldev_vaccelrt_get_timers;
+    abc->init = acceldev_vaccel_init;
+    abc->cleanup = acceldev_vaccel_cleanup;
+    abc->create_session = acceldev_vaccel_create_session;
+    abc->destroy_session = acceldev_vaccel_destroy_session;
+    abc->do_op = acceldev_vaccel_operation;
+    abc->timer_start = acceldev_vaccel_timer_start;
+    abc->timer_stop = acceldev_vaccel_timer_stop;
+    abc->timers_get = acceldev_vaccel_get_timers;
 }
 
-static const TypeInfo acceldev_vaccelrt_info = {
+static const TypeInfo acceldev_vaccel_info = {
     .name = TYPE_ACCELDEV_BACKEND_VACCELRT,
     .parent = TYPE_ACCELDEV_BACKEND,
-    .class_init = acceldev_vaccelrt_class_init,
+    .class_init = acceldev_vaccel_class_init,
     .instance_size = sizeof(AccelDevBackendVaccelRT),
 };
 
 static void
-acceldev_vaccelrt_register_types(void)
+acceldev_vaccel_register_types(void)
 {
-    type_register_static(&acceldev_vaccelrt_info);
+    type_register_static(&acceldev_vaccel_info);
 }
 
-type_init(acceldev_vaccelrt_register_types);
+type_init(acceldev_vaccel_register_types);

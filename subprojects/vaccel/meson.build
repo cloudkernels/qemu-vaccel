@@ -25,6 +25,6 @@ if vaccel_lib.found()
   vaccel_ss.add([
     vaccel_lib,
     files('backends/acceldev.c'),
-    files('backends/acceldev-vaccelrt.c')
+    files('backends/acceldev-vaccel.c')
   ])
 endif
