@@ -312,10 +312,10 @@
 ##
 # @AcceldevBackendProperties:
 #
-# Properties for acceldev-backend and acceldev-backend-vaccelrt objects.
+# Properties for acceldev-backend and acceldev-backend-vaccel objects.
 #
 # @queues: the number of queues for the acceldev backend. Ignored for
-#          acceldev-backend and must be 1 for acceldev-backend-vaccelrt.
+#          acceldev-backend and must be 1 for acceldev-backend-vaccel.
 #          (default: 1)
 #
 # Since: 2.8
@@ -1072,7 +1072,7 @@
       'if': 'CONFIG_VHOST_CRYPTO' },
     { 'name': 'acceldev-backend',
       'if': 'CONFIG_VACCEL' },
-    { 'name': 'acceldev-backend-vaccelrt',
+    { 'name': 'acceldev-backend-vaccel',
       'if': 'CONFIG_VACCEL' },
     'dbus-vmstate',
     'filter-buffer',
@@ -1150,7 +1150,7 @@
                                       'if': 'CONFIG_VHOST_CRYPTO' },
       'acceldev-backend':           { 'type': 'AcceldevBackendProperties',
                                       'if': 'CONFIG_VACCEL' },
-      'acceldev-backend-vaccelrt':  { 'type': 'AcceldevBackendProperties',
+      'acceldev-backend-vaccel':  { 'type': 'AcceldevBackendProperties',
                                       'if': 'CONFIG_VACCEL' },
       'dbus-vmstate':               'DBusVMStateProperties',
       'filter-buffer':              'FilterBufferProperties',
