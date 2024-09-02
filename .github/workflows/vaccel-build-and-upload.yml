@@ -1,0 +1,118 @@
+name: Build QEMU+vAccel docker image
+
+on:
+  push:
+    branches: [ '*\+vaccel' ]
+
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: harbor.nbfc.io/nubificus
+  IMAGE_NAME: qemu-vaccel
+  APP: qemu-vaccel
+
+jobs:
+  build:
+    name: Build Docker Image
+    runs-on: [self-hosted, gcc, lite, "${{ matrix.arch }}"]
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+    outputs:
+      digest-x86_64: ${{ steps.set-outputs.outputs.digest-x86_64 }}
+      digest-aarch64: ${{ steps.set-outputs.outputs.digest-aarch64 }}
+    steps:
+    - name: Cleanup previous jobs
+      run: |
+        echo "Cleaning up previous runs"
+        sudo rm -rf ${{ github.workspace }}/*
+        sudo rm -rf ${{ github.workspace }}/.??*
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Log into registry ${{ env.REGISTRY }}
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.HARBOR_USER }}
+        password: ${{ secrets.HARBOR_PASSWD }}
+
+    - name: Extract Docker metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=raw,value=${{ matrix.arch }}
+          type=sha,prefix=${{ matrix.arch }}-
+          type=sha,format=long,prefix=${{ matrix.arch }}-
+          type=ref,event=branch,prefix=${{ matrix.arch }}-
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build and push Docker image
+      id: build-and-push
+      uses: docker/build-push-action@v6
+      with:
+        context: ./subprojects/vaccel/docker
+        no-cache: true
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        build-args: |
+          ARCHTAG=${{ matrix.arch }}
+          BRANCH=${{ github.event.ref_name || github.ref_name }}
+
+    - name: Set per-arch outputs
+      id: set-outputs
+      run: |
+        # Workaround for https://github.com/actions/runner/issues/2499
+        echo "digest-${{ matrix.arch }}=${{ steps.build-and-push.outputs.digest }}" \
+          >> "$GITHUB_OUTPUT"
+
+  sign:
+    name: Sign Docker Image
+    runs-on: [self-hosted]
+    needs: [build]
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+    - name: Install Cosign
+      uses: sigstore/cosign-installer@v3.6.0
+
+    - name: Check install
+      run: cosign version
+
+    - name: Log into registry ${{ env.REGISTRY }}
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.HARBOR_USER }}
+        password: ${{ secrets.HARBOR_PASSWD }}
+
+    - name: Sign published Docker image
+      env:
+        DIGEST: ${{ needs.build.outputs[format('digest-{0}', matrix.arch)] }}
+      run: |
+        cosign sign --yes ${{ env.REGISTRY }}/${{ env.APP }}@${{ env.DIGEST }} \
+        -a "repo=${{ github.repository }}" \
+        -a "workflow=${{ github.workflow }}" \
+        -a "ref=${{ github.sha }}" \
+        -a "author=Nubificus LTD"
+
+    - name: Cleanup previous runs
+      if: ${{ always() }}
+      run: |
+        sudo rm -rf ${{ github.workspace }}/*
+        sudo rm -rf ${{ github.workspace }}/.??*
