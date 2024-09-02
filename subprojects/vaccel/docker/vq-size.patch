@@ -1,0 +1,13 @@
+diff --git a/include/hw/virtio/virtio.h b/include/hw/virtio/virtio.h
+index b69d517496..64967d7e3d 100644
+--- a/include/hw/virtio/virtio.h
++++ b/include/hw/virtio/virtio.h
+@@ -47,7 +47,7 @@ size_t virtio_feature_get_config_size(VirtIOFeature *features,
+ 
+ typedef struct VirtQueue VirtQueue;
+ 
+-#define VIRTQUEUE_MAX_SIZE 1024
++#define VIRTQUEUE_MAX_SIZE 8192
+ 
+ typedef struct VirtQueueElement
+ {
