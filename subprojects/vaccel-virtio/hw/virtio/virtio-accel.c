@@ -26,6 +26,7 @@ static void virtio_accel_init_request(VirtIOAccelReq *req,
     req->out_niov = 0;
     req->in_iov_len = 0;
     req->in_status = NULL;
+    memset(&req->info, 0x00, sizeof(req->info));
 }
 
 static void virtio_accel_free_request(VirtIOAccelReq *req)
@@ -33,10 +34,10 @@ static void virtio_accel_free_request(VirtIOAccelReq *req)
     if (req->hdr.op_type == VIRTIO_ACCEL_CREATE_SESSION ||
             req->hdr.op_type == VIRTIO_ACCEL_DO_OP ||
             req->hdr.op_type == VIRTIO_ACCEL_GET_TIMERS) {
-        if (req->hdr.op.in)
-            g_free(req->hdr.op.in);
-        if (req->hdr.op.out)
-            g_free(req->hdr.op.out);
+        if (req->info.op.out)
+            g_free(req->info.op.out);
+        if (req->info.op.in)
+            g_free(req->info.op.in);
     }
     if (req)
         g_free(req);
@@ -76,33 +77,32 @@ virtio_accel_vaccel_create_session(VirtIOAccelReq *req)
     VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
     struct virtio_accel_hdr *h = &req->hdr;
     int queue_index = virtio_get_queue_index(req->vq);
+    AccelDevBackendOpInfo *op_info = &req->info;
     AccelDevBackendSessionInfo info;
     int64_t sess_id;
     int ret = -VIRTIO_ACCEL_ERR;
     size_t r;
     Error *local_err = NULL;
 
-    info.op_type = h->op_type;
-    info.op.in = (AccelDevBackendArg *)h->op.in;
-    info.op.out = (AccelDevBackendArg *)h->op.out;
-    info.op.in_nr = h->op.in_nr;
-    info.op.out_nr = h->op.out_nr;
+    // FIXME: merge structs
+    info.op_type = op_info->op_type;
+    info.op = op_info->op;
+
     sess_id = acceldev_backend_create_session(
                                      vaccel->runtime,
                                      &info, queue_index, &local_err);
     if (sess_id >= 0) {
         req->hdr.sess_id = (uint32_t)sess_id;
-        for (int i = 0; i < h->op.in_nr; i++) {
+        for (int i = 0; i < h->in_nr; i++) {
             r = iov_from_buf(req->in_iov, req->in_niov, 0, info.op.in[i].buf,
                             info.op.in[i].len);
             if (unlikely(r != info.op.in[i].len)) {
                 virtio_error(vdev, "virtio-accel in[%d] data incorrect", i);
-            return -VIRTIO_ACCEL_ERR;
-        }
+		return -VIRTIO_ACCEL_ERR;
+	    }
 
-                iov_discard_front(&req->in_iov, &req->in_niov,
-                                info.op.in[i].len);
-        }
+	    iov_discard_front(&req->in_iov, &req->in_niov, r);
+	}
 
         VADPRINTF("runtime create session_id=%" PRIu32 " successful\n",
                   req->hdr.sess_id);
@@ -132,7 +132,7 @@ virtio_accel_vaccel_destroy_session(VirtIOAccelReq *req)
                                      queue_index, &local_err);
     if (ret >= 0) {
         VADPRINTF("runtime destroy session_id=%" PRIu32 " successful\n",
-                req->hdr.sess_id);
+                h->sess_id);
     } else {
         if (local_err) {
             error_report_err(local_err);
@@ -149,37 +149,31 @@ virtio_accel_vaccel_do_op(VirtIOAccelReq *req)
     VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
     struct virtio_accel_hdr *h = &req->hdr;
     int queue_index = virtio_get_queue_index(req->vq);
-    AccelDevBackendOpInfo info;
+    AccelDevBackendOpInfo *info = &req->info;
     int ret = -VIRTIO_ACCEL_ERR;
     size_t r;
     Error *local_err = NULL;
 
     acceldev_backend_timer_start(vaccel->runtime, h->sess_id, "do op",
                                  queue_index, &local_err);
-    info.op_type = h->op_type;
-    info.sess_id = h->sess_id;
-    info.op.in = (AccelDevBackendArg *)h->op.in;
-    info.op.out = (AccelDevBackendArg *)h->op.out;
-    info.op.in_nr = h->op.in_nr;
-    info.op.out_nr = h->op.out_nr;
-    ret = acceldev_backend_operation(vaccel->runtime, &info, queue_index,
+
+    ret = acceldev_backend_operation(vaccel->runtime, info, queue_index,
                                      &local_err);
 
     if (ret >= 0) {
-        for (int i = 0; i < h->op.in_nr; i++) {
-            r = iov_from_buf(req->in_iov, req->in_niov, 0, info.op.in[i].buf,
-                            info.op.in[i].len);
-            if (unlikely(r != info.op.in[i].len)) {
+        for (int i = 0; i < h->in_nr; i++) {
+            r = iov_from_buf(req->in_iov, req->in_niov, 0, info->op.in[i].buf,
+                            info->op.in[i].len);
+            if (unlikely(r != info->op.in[i].len)) {
                 virtio_error(vdev, "virtio-accel in[%d] data incorrect", i);
                 return -VIRTIO_ACCEL_ERR;
             }
 
-            iov_discard_front(&req->in_iov, &req->in_niov,
-                            info.op.in[i].len);
+            iov_discard_front(&req->in_iov, &req->in_niov, r);
         }
 
         VADPRINTF("runtime op session_id=%" PRId64 " successful\n",
-                info.sess_id);
+                info->sess_id);
     } else {
         if (local_err) {
             error_report_err(local_err);
@@ -199,36 +193,28 @@ virtio_accel_vaccel_get_timers(VirtIOAccelReq *req)
     VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
     struct virtio_accel_hdr *h = &req->hdr;
     int queue_index = virtio_get_queue_index(req->vq);
-    AccelDevBackendOpInfo info;
+    AccelDevBackendOpInfo *info = &req->info;
     int ret = -VIRTIO_ACCEL_ERR;
     size_t r;
     Error *local_err = NULL;
 
-    info.op_type = h->op_type;
-    info.sess_id = h->sess_id;
-    info.op.in = (AccelDevBackendArg *)h->op.in;
-    info.op.out = (AccelDevBackendArg *)h->op.out;
-    info.op.in_nr = h->op.in_nr;
-    info.op.out_nr = h->op.out_nr;
-
-    ret = acceldev_backend_get_timers(vaccel->runtime, &info, queue_index,
+    ret = acceldev_backend_get_timers(vaccel->runtime, info, queue_index,
                                      &local_err);
 
     if (ret >= 0) {
-        for (int i = 0; i < h->op.in_nr; i++) {
-            r = iov_from_buf(req->in_iov, req->in_niov, 0, info.op.in[i].buf,
-                            info.op.in[i].len);
-            if (unlikely(r != info.op.in[i].len)) {
+        for (int i = 0; i < h->in_nr; i++) {
+            r = iov_from_buf(req->in_iov, req->in_niov, 0, info->op.in[i].buf,
+                            info->op.in[i].len);
+            if (unlikely(r != info->op.in[i].len)) {
                 virtio_error(vdev, "virtio-accel in[%d] data incorrect", i);
                 return -VIRTIO_ACCEL_ERR;
             }
 
-            iov_discard_front(&req->in_iov, &req->in_niov,
-                            info.op.in[i].len);
+            iov_discard_front(&req->in_iov, &req->in_niov, r);
         }
 
         VADPRINTF("runtime op session_id=%" PRId64 " successful\n",
-                info.sess_id);
+                info->sess_id);
     } else {
         if (local_err) {
             error_report_err(local_err);
@@ -244,54 +230,93 @@ virtio_accel_handle_req_header_data(VirtIOAccelReq *req)
     VirtIOAccel *vaccel = req->vaccel;
     VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
     struct virtio_accel_hdr *h = &req->hdr;
+    struct virtio_accel_arg_hdr arg_h;
     int i;
-    size_t r;
+    size_t r, offset;
     AccelDevBackendArg *gop_arg;
+    AccelDevBackendOpInfo *info = &req->info;
 
     h->op_type = virtio_ldl_p(vdev, &h->op_type);
+    h->out_nr = virtio_ldl_p(vdev, &h->out_nr);
+    h->in_nr = virtio_ldl_p(vdev, &h->in_nr);
+    h->sess_id = virtio_ldl_p(vdev, &h->sess_id);
+
+    info->op_type = h->op_type;
+    info->sess_id = h->sess_id;
+    info->op.out_nr = h->out_nr;
+    info->op.in_nr = h->in_nr;
+
     switch (h->op_type) {
     case VIRTIO_ACCEL_CREATE_SESSION:
     case VIRTIO_ACCEL_DO_OP:
     case VIRTIO_ACCEL_GET_TIMERS:
-        h->op.in_nr = virtio_ldl_p(vdev, &h->op.in_nr);
-        h->op.out_nr = virtio_ldl_p(vdev, &h->op.out_nr);
-        if (h->op.out_nr > 0) {
-            gop_arg = g_new0(AccelDevBackendArg, h->op.out_nr);
-            for (i = 0; i < h->op.out_nr; i++) {
-                gop_arg[i].len = h->op.out[i].len;
-                gop_arg[i].buf = g_malloc0(h->op.out[i].len);
+        if (h->out_nr > 0) {
+            gop_arg = g_new0(AccelDevBackendArg, h->out_nr);
+            for (i = 0; i < h->out_nr; i++) {
+                r = iov_to_buf(req->out_iov, req->out_niov, 0, &arg_h,
+                                sizeof(arg_h));
+                if (unlikely(r !=  sizeof(arg_h))) {
+                    virtio_error(vdev,
+                                    "virtio-accel out[%d] arg header too short",
+                                    i);
+                    return;
+                }
+                iov_discard_front(&req->out_iov, &req->out_niov, r);
+
+                gop_arg[i].len = virtio_ldl_p(vdev, &arg_h.len);
+                gop_arg[i].type = virtio_ldl_p(vdev, &arg_h.type);
+                gop_arg[i].custom_type_id = virtio_ldl_p(vdev,
+                                &arg_h.custom_type_id);
+            }
+
+            for (i = 0; i < h->out_nr; i++) {
+                gop_arg[i].buf = g_malloc0(gop_arg[i].len);
                 r = iov_to_buf(req->out_iov, req->out_niov, 0, gop_arg[i].buf,
-                                h->op.out[i].len);
-                if (unlikely(r !=  h->op.out[i].len)) {
+                                gop_arg[i].len);
+                if (unlikely(r != gop_arg[i].len)) {
                     virtio_error(vdev, "virtio-accel gop_arg[%d] too short", i);
                     return;
                 }
-                iov_discard_front(&req->out_iov, &req->out_niov,
-                                h->op.out[i].len);
+                iov_discard_front(&req->out_iov, &req->out_niov, r);
             }
-            h->op.out = (struct virtio_accel_arg *)gop_arg;
+            info->op.out = gop_arg;
         }
-        if (h->op.in_nr > 0) {
-            gop_arg = g_new0(AccelDevBackendArg, h->op.in_nr);
-            int offset = 0;
-            for (i = 0; i < h->op.in_nr; i++) {
-                gop_arg[i].len = h->op.in[i].len;
-                gop_arg[i].buf = g_malloc0(h->op.in[i].len);
+
+        if (h->in_nr > 0) {
+            gop_arg = g_new0(AccelDevBackendArg, h->in_nr);
+            offset = 0;
+            for (i = 0; i < h->in_nr; i++) {
+                r = iov_to_buf(req->in_iov, req->in_niov, 0, &arg_h,
+                                sizeof(arg_h));
+                if (unlikely(r !=  sizeof(arg_h))) {
+                    virtio_error(vdev,
+                                    "virtio-accel in[%d] arg header too short",
+                                    i);
+                    return;
+                }
+                iov_discard_front(&req->in_iov, &req->in_niov, r);
+
+                gop_arg[i].len = virtio_ldl_p(vdev, &arg_h.len);
+                gop_arg[i].type = virtio_ldl_p(vdev, &arg_h.type);
+                gop_arg[i].custom_type_id = virtio_ldl_p(vdev,
+                                &arg_h.custom_type_id);
+            }
+
+            for (i = 0; i < h->in_nr; i++) {
+                gop_arg[i].buf = g_malloc0(gop_arg[i].len);
                 r = iov_to_buf(req->in_iov, req->in_niov, offset, gop_arg[i].buf,
-                                h->op.in[i].len);
-                if (unlikely(r !=  h->op.in[i].len)) {
+                                gop_arg[i].len);
+                if (unlikely(r != gop_arg[i].len)) {
                     virtio_error(vdev, "virtio-accel gop_arg[%d] too short", i);
                     return;
                 }
                 // don't discard these yet, we need to write them first
-                offset += h->op.in[i].len;
+                offset += r;
             }
-            h->op.in = (struct virtio_accel_arg *)gop_arg;
+            info->op.in = gop_arg;
         }
         break;
     case VIRTIO_ACCEL_DESTROY_SESSION:
-        h->sess_id = virtio_ldl_p(vdev, &h->sess_id);
-        break;
     default:
         break;
     }
@@ -333,17 +358,6 @@ virtio_accel_handle_request(VirtIOAccelReq *req)
     if (op_type == VIRTIO_ACCEL_DO_OP) {
         acceldev_backend_timer_start(vaccel->runtime, sess_id, "prepare header",
                                      queue_index, &local_err);
-    }
-
-    if (req->hdr.op.out_nr > 0) {
-        req->hdr.op.out = out_iov[0].iov_base;
-        iov_discard_front(&out_iov, &out_niov,
-                req->hdr.op.out_nr * sizeof(*req->hdr.op.out));
-    }
-    if (req->hdr.op.in_nr > 0) {
-        req->hdr.op.in = out_iov[0].iov_base;
-        iov_discard_front(&out_iov, &out_niov,
-                req->hdr.op.in_nr * sizeof(*req->hdr.op.in));
     }
 
     if (in_iov[in_niov - 1].iov_len !=

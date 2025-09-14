@@ -60,7 +60,7 @@ jobs:
         id: build-and-push
         uses: docker/build-push-action@v6
         with:
-          context: ./subprojects/vaccel/docker
+          context: ./subprojects/vaccel-virtio/docker
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/${{ matrix.arch }}

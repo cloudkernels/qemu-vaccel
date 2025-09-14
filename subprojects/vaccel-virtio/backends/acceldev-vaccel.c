@@ -4,7 +4,12 @@
 #include "../include/standard-headers/linux/virtio_accel.h"
 #include "../include/standard-headers/linux/accel.h"
 #include "qom/object.h"
+
+/* Work around a -Wstrict-prototypes warning in slog headers */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstrict-prototypes"
 #include <vaccel.h>
+#pragma GCC diagnostic pop
 
 
 /**
@@ -199,6 +204,8 @@ static int do_operation(
         for (int i = 0; i < info->op.out_nr; i++) {
             req_outargs[i].buf = out_args[i].buf;
             req_outargs[i].size = out_args[i].len;
+            req_outargs[i].type = (vaccel_arg_type_t)out_args[i].type;
+            req_outargs[i].custom_type_id = out_args[i].custom_type_id;
         }
     }
 
@@ -207,6 +214,8 @@ static int do_operation(
         for (int i = 0; i < info->op.in_nr; i++) {
             req_inargs[i].buf = in_args[i].buf;
             req_inargs[i].size = in_args[i].len;
+            req_inargs[i].type = (vaccel_arg_type_t)in_args[i].type;
+            req_inargs[i].custom_type_id = in_args[i].custom_type_id;
         }
     }
 
