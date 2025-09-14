@@ -3537,9 +3537,9 @@ if have_libvduse
   libvduse = libvduse_proj.get_variable('libvduse_dep')
 endif
 
-vaccel_sp = subproject('vaccel')
-vaccel = vaccel_sp.get_variable('vaccel_lib')
-config_host_data.set('CONFIG_VACCEL', vaccel.found())
+vaccel_virtio = subproject('vaccel-virtio')
+libvaccel = vaccel_virtio.get_variable('libvaccel_dep')
+config_host_data.set('CONFIG_VACCEL', libvaccel.found())
 
 #####################
 # Generated sources #
@@ -4133,9 +4133,9 @@ libhwcore = static_library('hwcore', sources: hwcore_ss.sources() + genh,
 hwcore = declare_dependency(objects: libhwcore.extract_all_objects(recursive: false))
 common_ss.add(hwcore)
 
-if vaccel.found()
-  specific_ss.add_all(vaccel_sp.get_variable('vaccel_virtio_ss'))
-  system_ss.add_all(vaccel_sp.get_variable('vaccel_ss'))
+if libvaccel.found()
+  specific_ss.add_all(vaccel_virtio.get_variable('virtio_accel_ss'))
+  system_ss.add_all(vaccel_virtio.get_variable('vaccel_ss'))
 endif
 
 ###########
@@ -5019,7 +5019,7 @@ summary_info += {'libpmem support':   libpmem}
 summary_info += {'libdaxctl support': libdaxctl}
 summary_info += {'libcbor support':   libcbor}
 summary_info += {'libudev':           libudev}
-summary_info += {'vAccel support':          vaccel}
+summary_info += {'vAccel support':          libvaccel}
 # Dummy dependency, keep .found()
 summary_info += {'FUSE lseek':        fuse_lseek.found()}
 summary_info += {'selinux':           selinux}

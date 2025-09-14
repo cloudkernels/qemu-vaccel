@@ -13,8 +13,10 @@
 
 
 struct accel_arg {
+	uint64_t buf;
 	uint32_t len;
-	unsigned char *buf;
+	uint32_t type;
+	uint32_t custom_type_id;
 };
 
 struct accel_op {
