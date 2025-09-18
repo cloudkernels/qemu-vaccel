@@ -2,6 +2,7 @@
 #define _QEMU_VIRTIO_ACCEL_H
 
 #include "../../standard-headers/linux/virtio_accel.h"
+#include "qemu/iov.h"
 #include "hw/virtio/virtio.h"
 #include "system/iothread.h"
 #include "../../system/acceldev.h"
@@ -40,18 +41,25 @@ typedef struct VirtIOAccelReq {
     VirtQueueElement elem;
     
     VirtQueue *vq;
-    /* flags of operation, such as type of algorithm */
-    uint32_t flags;
+    struct VirtIOAccel *vaccel;
+
+    uint64_t request_id;
+    uint32_t total_chunks;
+    uint32_t received_chunks;
+    struct VirtIOAccelReq **chunk_reqs;
+    QEMUIOVector out_qiov;
+    QEMUIOVector in_qiov;
 
     struct virtio_accel_hdr hdr;
-    struct VirtIOAccel *vaccel;
-    struct iovec *in_iov;
     struct iovec *out_iov;
-    unsigned int in_niov;
+    struct iovec *in_iov;
     unsigned int out_niov;
+    unsigned int in_niov;
     size_t in_iov_len;
     AccelDevBackendOpInfo info;
     uint32_t *in_status;
+
+    QTAILQ_ENTRY(VirtIOAccelReq) next;
 } VirtIOAccelReq;
 
 typedef struct VirtIOAccelQueue {
@@ -60,12 +68,17 @@ typedef struct VirtIOAccelQueue {
     struct VirtIOAccel *vaccel;
 } VirtIOAccelQueue;
 
+typedef QTAILQ_HEAD(, VirtIOAccelReq) VirtIOAccelReqList;
+
 typedef struct VirtIOAccel {
     VirtIODevice parent_obj;
 
     VirtIOAccelQueue *vqs;
     VirtIOAccelConf conf;
     AccelDevBackend *runtime;
+
+    QemuMutex pending_mutex;
+    VirtIOAccelReqList pending_reqs;
 
     uint32_t max_queues;
     uint32_t status;
