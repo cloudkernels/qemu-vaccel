@@ -16,17 +16,16 @@ else
   libvaccel_dep = dependency('vaccel')
 endif
 
-virtio_accel_ss = ss.source_set()
-vaccel_ss = ss.source_set()
+vaccel_virtio_common_subp = subproject('vaccel-virtio-common')
+libvaccel_virtio_common_dep = dependency('vaccel-virtio-common')
 
-if libvaccel_dep.found()
-  virtio_accel_ss.add([
-    files('hw/virtio/virtio-accel.c'),
-    files('hw/virtio/virtio-accel-pci.c')
-  ])
-  vaccel_ss.add([
-    libvaccel_dep,
-    files('backends/acceldev.c'),
-    files('backends/acceldev-vaccel.c')
-  ])
-endif
+vaccel_virtio_dep = declare_dependency(
+  include_directories : include_directories('include'))
+
+virtio_accel_ss = ss.source_set()
+acceldev_ss = ss.source_set()
+
+acceldev_ss.add(vaccel_virtio_dep)
+
+subdir('backends')
+subdir('hw')
