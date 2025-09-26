@@ -1,16 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 #include "qemu/osdep.h"
-#include "../include/system/acceldev.h"
 #include "qapi/error.h"
 #include "qapi/visitor.h"
 #include "qemu/config-file.h"
 #include "qom/object_interfaces.h"
-#include "../include/hw/virtio/virtio-accel.h"
 
+#include "hw/virtio/virtio-accel.h"
+#include "system/acceldev.h"
 
 static QTAILQ_HEAD(, AccelDevBackendClient) accel_clients;
 
-AccelDevBackendClient *
-acceldev_backend_new_client(const char *model, const char *name)
+AccelDevBackendClient *acceldev_backend_new_client(const char *model,
+                                                   const char *name)
 {
     AccelDevBackendClient *c;
 
@@ -36,36 +38,30 @@ void acceldev_backend_free_client(AccelDevBackendClient *c)
 
 void acceldev_backend_cleanup(AccelDevBackend *ab, Error **errp)
 {
-    AccelDevBackendClass *abc =
-                  ACCELDEV_BACKEND_GET_CLASS(ab);
+    AccelDevBackendClass *abc = ACCELDEV_BACKEND_GET_CLASS(ab);
 
     if (abc->cleanup) {
         abc->cleanup(ab, errp);
     }
 }
 
-int64_t acceldev_backend_create_session(
-           AccelDevBackend *ab,
-           AccelDevBackendSessionInfo *sess_info,
-           uint32_t queue_index, Error **errp)
+int64_t acceldev_backend_create_session(AccelDevBackend *ab,
+                                        AccelDevBackendOpInfo *info,
+                                        uint32_t queue_index, Error **errp)
 {
-    AccelDevBackendClass *abc =
-                      ACCELDEV_BACKEND_GET_CLASS(ab);
+    AccelDevBackendClass *abc = ACCELDEV_BACKEND_GET_CLASS(ab);
 
     if (abc->create_session) {
-        return abc->create_session(ab, sess_info, queue_index, errp);
+        return abc->create_session(ab, info, queue_index, errp);
     }
 
     return -VIRTIO_ACCEL_ERR;
 }
 
-int acceldev_backend_destroy_session(
-                 AccelDevBackend *ab,
-                 int64_t sess_id,
-                 uint32_t queue_index, Error **errp)
+int acceldev_backend_destroy_session(AccelDevBackend *ab, int64_t sess_id,
+                                     uint32_t queue_index, Error **errp)
 {
-    AccelDevBackendClass *abc =
-                      ACCELDEV_BACKEND_GET_CLASS(ab);
+    AccelDevBackendClass *abc = ACCELDEV_BACKEND_GET_CLASS(ab);
 
     if (abc->destroy_session) {
         return abc->destroy_session(ab, sess_id, queue_index, errp);
@@ -74,29 +70,23 @@ int acceldev_backend_destroy_session(
     return -VIRTIO_ACCEL_ERR;
 }
 
-int acceldev_backend_operation(
-                 AccelDevBackend *ab,
-                 AccelDevBackendOpInfo *op_info,
-                 uint32_t queue_index, Error **errp)
+int acceldev_backend_operation(AccelDevBackend *ab, AccelDevBackendOpInfo *info,
+                               uint32_t queue_index, Error **errp)
 {
-    AccelDevBackendClass *abc =
-                      ACCELDEV_BACKEND_GET_CLASS(ab);
+    AccelDevBackendClass *abc = ACCELDEV_BACKEND_GET_CLASS(ab);
 
     if (abc->do_op) {
-        return abc->do_op(ab, op_info, queue_index, errp);
+        return abc->do_op(ab, info, queue_index, errp);
     }
 
     return -VIRTIO_ACCEL_ERR;
 }
 
-int acceldev_backend_timer_start(
-                 AccelDevBackend *ab,
-                 int64_t sess_id,
-                 const char *name,
-                 uint32_t queue_index, Error **errp)
+int acceldev_backend_timer_start(AccelDevBackend *ab, int64_t sess_id,
+                                 const char *name, uint32_t queue_index,
+                                 Error **errp)
 {
-    AccelDevBackendClass *abc =
-                      ACCELDEV_BACKEND_GET_CLASS(ab);
+    AccelDevBackendClass *abc = ACCELDEV_BACKEND_GET_CLASS(ab);
 
     if (abc->timer_start) {
         return abc->timer_start(ab, sess_id, name, queue_index, errp);
@@ -105,14 +95,11 @@ int acceldev_backend_timer_start(
     return -VIRTIO_ACCEL_ERR;
 }
 
-int acceldev_backend_timer_stop(
-                 AccelDevBackend *ab,
-                 int64_t sess_id,
-                 const char *name,
-                 uint32_t queue_index, Error **errp)
+int acceldev_backend_timer_stop(AccelDevBackend *ab, int64_t sess_id,
+                                const char *name, uint32_t queue_index,
+                                Error **errp)
 {
-    AccelDevBackendClass *abc =
-                      ACCELDEV_BACKEND_GET_CLASS(ab);
+    AccelDevBackendClass *abc = ACCELDEV_BACKEND_GET_CLASS(ab);
 
     if (abc->timer_stop) {
         return abc->timer_stop(ab, sess_id, name, queue_index, errp);
@@ -121,13 +108,11 @@ int acceldev_backend_timer_stop(
     return -VIRTIO_ACCEL_ERR;
 }
 
-int acceldev_backend_get_timers(
-                 AccelDevBackend *ab,
-                 AccelDevBackendOpInfo *op_info,
-                 uint32_t queue_index, Error **errp)
+int acceldev_backend_get_timers(AccelDevBackend *ab,
+                                AccelDevBackendOpInfo *op_info,
+                                uint32_t queue_index, Error **errp)
 {
-    AccelDevBackendClass *abc =
-                      ACCELDEV_BACKEND_GET_CLASS(ab);
+    AccelDevBackendClass *abc = ACCELDEV_BACKEND_GET_CLASS(ab);
 
     if (abc->do_op) {
         return abc->timers_get(ab, op_info, queue_index, errp);
@@ -136,9 +121,9 @@ int acceldev_backend_get_timers(
     return -VIRTIO_ACCEL_ERR;
 }
 
-static void
-acceldev_backend_get_queues(Object *obj, Visitor *v, const char *name,
-                             void *opaque, Error **errp)
+static void acceldev_backend_get_queues(Object *obj, Visitor *v,
+                                        const char *name, void *opaque,
+                                        Error **errp)
 {
     AccelDevBackend *ab = ACCELDEV_BACKEND(obj);
     uint32_t value = ab->conf.peers.queues;
@@ -146,9 +131,9 @@ acceldev_backend_get_queues(Object *obj, Visitor *v, const char *name,
     visit_type_uint32(v, name, &value, errp);
 }
 
-static void
-acceldev_backend_set_queues(Object *obj, Visitor *v, const char *name,
-                             void *opaque, Error **errp)
+static void acceldev_backend_set_queues(Object *obj, Visitor *v,
+                                        const char *name, void *opaque,
+                                        Error **errp)
 {
     AccelDevBackend *ab = ACCELDEV_BACKEND(obj);
     uint32_t value;
@@ -157,15 +142,14 @@ acceldev_backend_set_queues(Object *obj, Visitor *v, const char *name,
         return;
 
     if (!value) {
-        error_setg(errp, "Property '%s.%s' doesn't take value '%"
-                   PRIu32 "'", object_get_typename(obj), name, value);
+        error_setg(errp, "Property '%s.%s' doesn't take value '%" PRIu32 "'",
+                   object_get_typename(obj), name, value);
         return;
     }
     ab->conf.peers.queues = value;
 }
 
-static void
-acceldev_backend_complete(UserCreatable *uc, Error **errp)
+static void acceldev_backend_complete(UserCreatable *uc, Error **errp)
 {
     AccelDevBackend *ab = ACCELDEV_BACKEND(uc);
     AccelDevBackendClass *abc = ACCELDEV_BACKEND_GET_CLASS(uc);
@@ -196,8 +180,7 @@ bool acceldev_backend_is_ready(AccelDevBackend *ab)
     return ab->ready;
 }
 
-static bool
-acceldev_backend_can_be_deleted(UserCreatable *uc)
+static bool acceldev_backend_can_be_deleted(UserCreatable *uc)
 {
     return !acceldev_backend_is_used(ACCELDEV_BACKEND(uc));
 }
@@ -215,8 +198,7 @@ static void acceldev_backend_finalize(Object *obj)
     acceldev_backend_cleanup(ab, NULL);
 }
 
-static void
-acceldev_backend_class_init(ObjectClass *oc, const void *data)
+static void acceldev_backend_class_init(ObjectClass *oc, const void *data)
 {
     UserCreatableClass *ucc = USER_CREATABLE_CLASS(oc);
 
@@ -225,9 +207,8 @@ acceldev_backend_class_init(ObjectClass *oc, const void *data)
 
     QTAILQ_INIT(&accel_clients);
     object_class_property_add(oc, "queues", "uint32",
-                          acceldev_backend_get_queues,
-                          acceldev_backend_set_queues,
-                          NULL, NULL);
+                              acceldev_backend_get_queues,
+                              acceldev_backend_set_queues, NULL, NULL);
 }
 
 static const TypeInfo acceldev_backend_info = {
@@ -238,14 +219,10 @@ static const TypeInfo acceldev_backend_info = {
     .instance_finalize = acceldev_backend_finalize,
     .class_size = sizeof(AccelDevBackendClass),
     .class_init = acceldev_backend_class_init,
-    .interfaces = (const InterfaceInfo[]) {
-        { TYPE_USER_CREATABLE },
-        { }
-    }
+    .interfaces = (const InterfaceInfo[]){ { TYPE_USER_CREATABLE }, {} }
 };
 
-static void
-acceldev_backend_register_types(void)
+static void acceldev_backend_register_types(void)
 {
     type_register_static(&acceldev_backend_info);
 }

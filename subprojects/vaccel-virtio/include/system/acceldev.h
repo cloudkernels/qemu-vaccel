@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 #ifndef ACCELDEV_H
 #define ACCELDEV_H
 
@@ -6,11 +8,9 @@
 
 #define TYPE_ACCELDEV_BACKEND "acceldev-backend"
 
-OBJECT_DECLARE_TYPE(AccelDevBackend, AccelDevBackendClass,
-                    ACCELDEV_BACKEND)
+OBJECT_DECLARE_TYPE(AccelDevBackend, AccelDevBackendClass, ACCELDEV_BACKEND)
 
-
-#define MAX_ACCEL_QUEUE_NUM  64
+#define MAX_ACCEL_QUEUE_NUM 64
 
 typedef struct AccelDevBackendConf AccelDevBackendConf;
 typedef struct AccelDevBackendPeers AccelDevBackendPeers;
@@ -24,24 +24,15 @@ typedef struct AccelDevBackendArg {
     uint32_t custom_type_id;
 } AccelDevBackendArg;
 
-typedef struct AccelDevBackendInfo {
+typedef struct AccelDevBackendOpInfo {
+    int64_t session_id;
+    uint32_t op_code;
     uint32_t out_nr;
     uint32_t in_nr;
     AccelDevBackendArg *out;
     AccelDevBackendArg *in;
-} AccelDevBackendInfo;
-
-typedef struct AccelDevBackendSessionInfo {
-    uint32_t op_type;
-    AccelDevBackendInfo op;
-} AccelDevBackendSessionInfo;
-
-typedef struct AccelDevBackendOpInfo {
-    uint32_t op_type;
-    int64_t sess_id;
-    AccelDevBackendInfo op;
+    uint32_t op_ret;
 } AccelDevBackendOpInfo;
-
 
 typedef struct AccelDevBackendClass {
     ObjectClass parent_class;
@@ -49,32 +40,18 @@ typedef struct AccelDevBackendClass {
     void (*init)(AccelDevBackend *ab, Error **errp);
     void (*cleanup)(AccelDevBackend *ab, Error **errp);
 
-    int64_t (*create_session)(
-                 AccelDevBackend *ab,
-                 AccelDevBackendSessionInfo *sess_info,
+    int64_t (*create_session)(AccelDevBackend *ab, AccelDevBackendOpInfo *info,
+                              uint32_t queue_index, Error **errp);
+    int (*destroy_session)(AccelDevBackend *ab, int64_t sess_id,
+                           uint32_t queue_index, Error **errp);
+    int (*do_op)(AccelDevBackend *ab, AccelDevBackendOpInfo *info,
                  uint32_t queue_index, Error **errp);
-    int (*destroy_session)(
-                 AccelDevBackend *ab,
-                 int64_t sess_id,
-                 uint32_t queue_index, Error **errp);
-    int (*do_op)(
-                 AccelDevBackend *ab,
-                 AccelDevBackendOpInfo *op_info,
-                 uint32_t queue_index, Error **errp);
-    int (*timer_start)(
-                 AccelDevBackend *ab,
-                 int64_t sess_id,
-                 const char *name,
-                 uint32_t queue_index, Error **errp);
-    int (*timer_stop)(
-                 AccelDevBackend *ab,
-                 int64_t sess_id,
-                 const char *name,
-                 uint32_t queue_index, Error **errp);
-    int (*timers_get)(
-                 AccelDevBackend *ab,
-                 AccelDevBackendOpInfo *info,
-                 uint32_t queue_index, Error **errp);
+    int (*timer_start)(AccelDevBackend *ab, int64_t sess_id, const char *name,
+                       uint32_t queue_index, Error **errp);
+    int (*timer_stop)(AccelDevBackend *ab, int64_t sess_id, const char *name,
+                      uint32_t queue_index, Error **errp);
+    int (*timers_get)(AccelDevBackend *ab, AccelDevBackendOpInfo *info,
+                      uint32_t queue_index, Error **errp);
 } AccelDevBackendClass;
 
 struct AccelDevBackendClient {
@@ -122,8 +99,8 @@ struct AccelDevBackend {
  *
  * Returns: a new acceldev backend client object
  */
-AccelDevBackendClient *
-acceldev_backend_new_client(const char *model, const char *name);
+AccelDevBackendClient *acceldev_backend_new_client(const char *model,
+                                                   const char *name);
 
 /**
  * acceldev_backend_free_client:
@@ -142,14 +119,12 @@ void acceldev_backend_free_client(AccelDevBackendClient *c);
  * Clean the resouce associated with @backend that realizaed
  * by the specific backend's init() callback
  */
-void acceldev_backend_cleanup(
-           AccelDevBackend *ab,
-           Error **errp);
+void acceldev_backend_cleanup(AccelDevBackend *ab, Error **errp);
 
 /**
  * acceldev_backend_create_session:
  * @ab: the acceldev backend object
- * @sess_info: parameters needed by session creating
+ * @info: parameters needed for session creation
  * @queue_index: queue index of acceldev backend client
  * @errp: pointer to a NULL-initialized error object
  *
@@ -158,10 +133,9 @@ void acceldev_backend_cleanup(
  * Returns: session id on success,
  *         or -VIRTIO_ACCEL_* on error
  */
-int64_t acceldev_backend_create_session(
-           AccelDevBackend *ab,
-           AccelDevBackendSessionInfo *sess_info,
-           uint32_t queue_index, Error **errp);
+int64_t acceldev_backend_create_session(AccelDevBackend *ab,
+                                        AccelDevBackendOpInfo *info,
+                                        uint32_t queue_index, Error **errp);
 
 /**
  * acceldev_backend_destroy_session:
@@ -176,15 +150,13 @@ int64_t acceldev_backend_create_session(
  * Returns: VIRTIO_ACCEL_OK on success,
  *         or -VIRTIO_ACCEL_* on error
  */
-int acceldev_backend_destroy_session(
-           AccelDevBackend *ab,
-           int64_t sess_id,
-           uint32_t queue_index, Error **errp);
+int acceldev_backend_destroy_session(AccelDevBackend *ab, int64_t sess_id,
+                                     uint32_t queue_index, Error **errp);
 
 /**
  * acceldev_backend_operation:
  * @ab: the acceldev backend object
- * @op_info: parameters needed to execute an operation 
+ * @info: parameters needed to execute an operation 
  * @queue_index: queue index of acceldev backend client
  * @errp: pointer to a NULL-initialized error object
  *
@@ -193,10 +165,8 @@ int acceldev_backend_destroy_session(
  * Returns: VIRTIO_ACCEL_OK on success,
  *         or -VIRTIO_ACCEL_* on error
  */
-int acceldev_backend_operation(
-                 AccelDevBackend *ab,
-                 AccelDevBackendOpInfo *op_info,
-                 uint32_t queue_index, Error **errp);
+int acceldev_backend_operation(AccelDevBackend *ab, AccelDevBackendOpInfo *info,
+                               uint32_t queue_index, Error **errp);
 
 /**
  * acceldev_backend_timer_start:
@@ -211,11 +181,9 @@ int acceldev_backend_operation(
  * Returns: VIRTIO_ACCEL_OK on success,
  *         or -VIRTIO_ACCEL_* on error
  */
-int acceldev_backend_timer_start(
-                 AccelDevBackend *ab,
-                 int64_t sess_id,
-                 const char *name,
-                 uint32_t queue_index, Error **errp);
+int acceldev_backend_timer_start(AccelDevBackend *ab, int64_t sess_id,
+                                 const char *name, uint32_t queue_index,
+                                 Error **errp);
 
 /**
  * acceldev_backend_timer_stop:
@@ -230,11 +198,9 @@ int acceldev_backend_timer_start(
  * Returns: VIRTIO_ACCEL_OK on success,
  *         or -VIRTIO_ACCEL_* on error
  */
-int acceldev_backend_timer_stop(
-                 AccelDevBackend *ab,
-                 int64_t sess_id,
-                 const char *name,
-                 uint32_t queue_index, Error **errp);
+int acceldev_backend_timer_stop(AccelDevBackend *ab, int64_t sess_id,
+                                const char *name, uint32_t queue_index,
+                                Error **errp);
 
 /**
  * acceldev_backend_get_timers:
@@ -248,10 +214,9 @@ int acceldev_backend_timer_stop(
  * Returns: VIRTIO_ACCEL_OK on success,
  *         or -VIRTIO_ACCEL_* on error
  */
-int acceldev_backend_get_timers(
-                 AccelDevBackend *ab,
-                 AccelDevBackendOpInfo *op_info,
-                 uint32_t queue_index, Error **errp);
+int acceldev_backend_get_timers(AccelDevBackend *ab,
+                                AccelDevBackendOpInfo *op_info,
+                                uint32_t queue_index, Error **errp);
 
 /**
  * acceldev_backend_set_used:
