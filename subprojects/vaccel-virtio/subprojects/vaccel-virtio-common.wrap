@@ -1,0 +1,6 @@
+[wrap-git]
+url = git@github.com:nubificus/vaccel-virtio-common
+revision = main
+
+[provide]
+vaccel-virtio-common = libvaccel_virtio_common_dep

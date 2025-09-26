@@ -1,12 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 #include "qemu/osdep.h"
+#include "qapi/error.h"
+#include "qemu/module.h"
 #include "hw/pci/pci.h"
 #include "hw/qdev-properties.h"
 #include "hw/virtio/virtio.h"
 #include "hw/virtio/virtio-bus.h"
 #include "hw/virtio/virtio-pci.h"
-#include "../../include/hw/virtio/virtio-accel.h"
-#include "qapi/error.h"
-#include "qemu/module.h"
+
+#include "hw/virtio/virtio-accel.h"
 
 typedef struct VirtIOAccelPCI VirtIOAccelPCI;
 
@@ -65,10 +68,10 @@ static void virtio_accel_initfn(Object *obj)
 }
 
 static const VirtioPCIDeviceTypeInfo virtio_accel_pci_info = {
-    .generic_name  = TYPE_VIRTIO_ACCEL_PCI,
+    .generic_name = TYPE_VIRTIO_ACCEL_PCI,
     .instance_size = sizeof(VirtIOAccelPCI),
     .instance_init = virtio_accel_initfn,
-    .class_init    = virtio_accel_pci_class_init,
+    .class_init = virtio_accel_pci_class_init,
 };
 
 static void virtio_accel_pci_register_types(void)

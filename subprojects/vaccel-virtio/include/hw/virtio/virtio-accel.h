@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 #ifndef _QEMU_VIRTIO_ACCEL_H
 #define _QEMU_VIRTIO_ACCEL_H
 
@@ -7,23 +9,19 @@
 #include "system/iothread.h"
 #include "../../system/acceldev.h"
 
-
 #define DEBUG_VIRTIO_ACCEL 1
 
-#define VADPRINTF(fmt, ...) \
-do { \
-    if (DEBUG_VIRTIO_ACCEL) { \
-        fprintf(stderr, "virtio_accel: " fmt, ##__VA_ARGS__); \
-    } \
-} while (0)
-
+#define VADPRINTF(fmt, ...)                                       \
+    do {                                                          \
+        if (DEBUG_VIRTIO_ACCEL) {                                 \
+            fprintf(stderr, "virtio_accel: " fmt, ##__VA_ARGS__); \
+        }                                                         \
+    } while (0)
 
 #define TYPE_VIRTIO_ACCEL "virtio-accel-device"
-#define VIRTIO_ACCEL(obj) \
-        OBJECT_CHECK(VirtIOAccel, (obj), TYPE_VIRTIO_ACCEL)
+#define VIRTIO_ACCEL(obj) OBJECT_CHECK(VirtIOAccel, (obj), TYPE_VIRTIO_ACCEL)
 #define VIRTIO_ACCEL_GET_PARENT_CLASS(obj) \
-        OBJECT_GET_PARENT_CLASS(obj, TYPE_VIRTIO_ACCEL)
-
+    OBJECT_GET_PARENT_CLASS(obj, TYPE_VIRTIO_ACCEL)
 
 typedef struct VirtIOAccelConf {
     AccelDevBackend *runtime;
@@ -39,25 +37,26 @@ struct VirtIOAccel;
 typedef struct VirtIOAccelReq {
     /* elem should always be first */
     VirtQueueElement elem;
-    
+
     VirtQueue *vq;
     struct VirtIOAccel *vaccel;
+
+    struct virtio_accel_hdr hdr;
+    QEMUIOVector out_qiov;
+    QEMUIOVector in_qiov;
+    struct iovec *in_data_iov;
+    int in_data_niov;
+    size_t in_iov_len;
+    uint8_t *in_status;
 
     uint64_t request_id;
     uint32_t total_chunks;
     uint32_t received_chunks;
     struct VirtIOAccelReq **chunk_reqs;
-    QEMUIOVector out_qiov;
-    QEMUIOVector in_qiov;
+    QEMUTimer *chunk_timer;
 
-    struct virtio_accel_hdr hdr;
-    struct iovec *out_iov;
-    struct iovec *in_iov;
-    unsigned int out_niov;
-    unsigned int in_niov;
-    size_t in_iov_len;
+    uint32_t cmd;
     AccelDevBackendOpInfo info;
-    uint32_t *in_status;
 
     QTAILQ_ENTRY(VirtIOAccelReq) next;
 } VirtIOAccelReq;
