@@ -44,8 +44,6 @@ typedef struct VirtIOAccelReq {
     struct virtio_accel_hdr hdr;
     QEMUIOVector out_qiov;
     QEMUIOVector in_qiov;
-    struct iovec *in_data_iov;
-    int in_data_niov;
     size_t in_iov_len;
     uint8_t *in_status;
 

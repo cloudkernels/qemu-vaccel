@@ -20,6 +20,7 @@ typedef struct AccelDevBackend AccelDevBackend;
 typedef struct AccelDevBackendArg {
     void *buf;
     uint32_t len;
+    uint32_t data_len;
     uint32_t type;
     uint32_t custom_type_id;
 } AccelDevBackendArg;
