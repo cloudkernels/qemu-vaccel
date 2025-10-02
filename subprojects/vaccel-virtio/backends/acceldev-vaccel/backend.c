@@ -89,7 +89,7 @@ static int parse_vaccel_args(AccelDevBackendArg *out_args,
         read = g_new0(struct vaccel_arg, nr_out_args);
         for (size_t i = 0; i < nr_out_args; i++) {
             ret = vaccel_arg_init_from_buf(&read[i], out_args[i].buf,
-                                           out_args[i].len,
+                                           (size_t)out_args[i].len,
                                            (vaccel_arg_type_t)out_args[i].type,
                                            out_args[i].custom_type_id);
             if (ret)
@@ -108,7 +108,7 @@ static int parse_vaccel_args(AccelDevBackendArg *out_args,
         write = g_new0(struct vaccel_arg, nr_in_args);
         for (size_t i = 0; i < nr_in_args; i++) {
             ret = vaccel_arg_init_from_buf(&write[i], in_args[i].buf,
-                                           in_args[i].len,
+                                           (size_t)in_args[i].len,
                                            (vaccel_arg_type_t)in_args[i].type,
                                            in_args[i].custom_type_id);
             if (ret)
@@ -130,6 +130,37 @@ free:
     g_free(write);
 
     return VIRTIO_ACCEL_ERR;
+}
+
+static int update_backend_args(AccelDevBackendArg *in_args, size_t nr_in_args,
+                               struct vaccel_arg_array *write_args,
+                               Error **errp)
+{
+    if (nr_in_args && (!in_args || !write_args))
+        return VIRTIO_ACCEL_ERR;
+
+    if (nr_in_args != write_args->count) {
+        error_setg(errp, "Invalid number of updated args");
+        return VIRTIO_ACCEL_ERR;
+    }
+
+    for (size_t i = 0; i < nr_in_args; i++) {
+        if ((uint32_t)write_args->args[i].size > in_args[i].len) {
+            error_setg(errp, "Updated arg %zu too large", i);
+            return VIRTIO_ACCEL_ERR;
+        }
+
+        if (write_args->args[i].buf != in_args[i].buf)
+            memcpy(in_args[i].buf, write_args->args[i].buf,
+                   write_args->args[i].size);
+
+        in_args[i].data_len = (uint32_t)write_args->args[i].size;
+        in_args[i].type = (uint32_t)write_args->args[i].type;
+        in_args[i].custom_type_id =
+            (uint32_t)write_args->args[i].custom_type_id;
+    }
+
+    return VIRTIO_ACCEL_OK;
 }
 
 static void cleanup_vaccel_args(struct vaccel_arg_array *read_args,
@@ -317,14 +348,17 @@ static int do_operation(struct vaccel_session *sess,
     acceldev_backend_timer_stop(ab, sess->id, "do op > genop", queue_index,
                                 errp);
 
-    acceldev_backend_timer_start(ab, sess->id, "do op > free prep", queue_index,
-                                 errp);
+    acceldev_backend_timer_start(ab, sess->id, "do op > update args",
+                                 queue_index, errp);
+
+    ret = -update_backend_args(info->in, info->in_nr, &write_args, errp);
+    if (ret)
+        error_setg(errp, "Failed to update backend args");
+
+    acceldev_backend_timer_stop(ab, sess->id, "do op > update args",
+                                queue_index, errp);
 
     cleanup_vaccel_args(&read_args, &write_args);
-
-    acceldev_backend_timer_stop(ab, sess->id, "do op > free prep", queue_index,
-                                errp);
-
     return ret;
 }
 
@@ -350,8 +384,8 @@ static int acceldev_vaccel_operation(AccelDevBackend *ab,
     }
 
     ret = do_operation(sess->opaque, info, ab, queue_index, errp);
-    if (ret != VACCEL_OK)
-        return -VIRTIO_ACCEL_ERR;
+    if (ret)
+        return ret;
 
     return VIRTIO_ACCEL_OK;
 }
