@@ -6,6 +6,8 @@ acceldev_ss.add(files(
   'ops.h',
   'resource.c',
   'resource.h',
+  'torch.c',
+  'torch.h',
   ))
 
 acceldev_ss.add([

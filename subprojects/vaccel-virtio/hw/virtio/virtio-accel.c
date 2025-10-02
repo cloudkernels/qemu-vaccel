@@ -27,8 +27,6 @@ static void virtio_accel_init_request(VirtIOAccelReq *req, VirtIOAccel *vaccel,
     memset(&req->hdr, 0x00, sizeof(req->hdr));
     qemu_iovec_init_external(&req->out_qiov, NULL, 0);
     qemu_iovec_init_external(&req->in_qiov, NULL, 0);
-    req->in_data_iov = NULL;
-    req->in_data_niov = 0;
     req->in_iov_len = 0;
     req->in_status = NULL;
 
@@ -104,15 +102,46 @@ static int virtio_accel_handle_cmd(VirtIOAccelReq *req)
     VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
     int queue_index = virtio_get_queue_index(req->vq);
     AccelDevBackendOpInfo *info = &req->info;
-    int ret = -VIRTIO_ACCEL_ERR;
+    struct iovec *in_iov = req->in_qiov.iov;
+    unsigned int in_niov = req->in_qiov.niov;
+    int64_t ret = -VIRTIO_ACCEL_ERR;
+    Error *local_err = NULL;
+    uint32_t *in_op_ret = NULL;
+    uint64_t *in_sess_id = NULL;
+    IOVDiscardUndo in_op_ret_undo;
+    IOVDiscardUndo in_sess_id_undo;
+    struct virtio_accel_arg_hdr arg_h;
     size_t r;
     size_t offset = 0;
-    Error *local_err = NULL;
 
     VADPRINTF("handle request cmd=%u, op_code=%u\n", req->cmd, info->op_code);
 
+    if (in_iov[in_niov - 1].iov_len != sizeof(info->op_ret)) {
+        virtio_error(vdev,
+                     "virtio-accel ret SG too short; expected %zu got %zu",
+                     sizeof(info->op_ret), in_iov[in_niov - 1].iov_len);
+        return -VIRTIO_ACCEL_BADMSG;
+    }
+
+    in_op_ret = in_iov[in_niov - 1].iov_base;
+    iov_discard_back_undoable(in_iov, &in_niov, in_iov[in_niov - 1].iov_len,
+                              &in_op_ret_undo);
+
     switch (req->cmd) {
     case VIRTIO_ACCEL_CMD_CREATE_SESSION:
+        if (in_iov[in_niov - 1].iov_len != sizeof(*in_sess_id)) {
+            virtio_error(
+                vdev,
+                "virtio-accel session_id SG too short; expected %zuB got %zuB",
+                sizeof(*in_sess_id), in_iov[in_niov - 1].iov_len);
+            ret = -VIRTIO_ACCEL_BADMSG;
+            goto out;
+        }
+
+        in_sess_id = in_iov[in_niov - 1].iov_base;
+        iov_discard_back_undoable(in_iov, &in_niov, in_iov[in_niov - 1].iov_len,
+                                  &in_sess_id_undo);
+
         ret = acceldev_backend_create_session(vaccel->runtime, info,
                                               queue_index, &local_err);
         break;
@@ -132,20 +161,37 @@ static int virtio_accel_handle_cmd(VirtIOAccelReq *req)
         break;
     default:
         error_report("virtio-accel unsupported cmd: %u", req->cmd);
-        ret = VIRTIO_ACCEL_NOTSUPP;
+        ret = -VIRTIO_ACCEL_NOTSUPP;
         break;
     }
 
     if (ret >= 0) {
-        for (int i = 0; i < info->in_nr; i++) {
-            r = iov_from_buf(req->in_data_iov, req->in_data_niov, offset,
-                             info->in[i].buf, info->in[i].len);
+        for (uint32_t i = 0; i < info->in_nr; i++) {
+            virtio_stl_p(vdev, &arg_h.len, info->in[i].data_len);
+            virtio_stl_p(vdev, &arg_h.type, info->in[i].type);
+            virtio_stl_p(vdev, &arg_h.custom_type_id,
+                         info->in[i].custom_type_id);
+
+            r = iov_from_buf(in_iov, in_niov, offset, &arg_h, sizeof(arg_h));
+            if (unlikely(r != sizeof(arg_h))) {
+                virtio_error(vdev, "virtio-accel in[%d] arg header too short",
+                             i);
+                ret = -VIRTIO_ACCEL_BADMSG;
+                goto out;
+            }
+
+            offset += r;
+        }
+
+        for (uint32_t i = 0; i < info->in_nr; i++) {
+            r = iov_from_buf(in_iov, in_niov, offset, info->in[i].buf,
+                             info->in[i].len);
             if (unlikely(r != info->in[i].len)) {
                 virtio_error(
                     vdev,
                     "virtio-accel in[%d] too short; expected %uB got %zuB", i,
                     info->in[i].len, r);
-                ret = -VIRTIO_ACCEL_ERR;
+                ret = -VIRTIO_ACCEL_BADMSG;
                 goto out;
             }
 
@@ -153,47 +199,27 @@ static int virtio_accel_handle_cmd(VirtIOAccelReq *req)
         }
 
         if (req->cmd == VIRTIO_ACCEL_CMD_CREATE_SESSION) {
-            uint64_t append_sess_id;
-            virtio_stq_p(vdev, &append_sess_id, ret);
+            virtio_stq_p(vdev, in_sess_id, ret);
             ret = 0;
-
-            r = iov_from_buf(req->in_data_iov, req->in_data_niov, offset,
-                             &append_sess_id, sizeof(append_sess_id));
-            if (unlikely(r != sizeof(append_sess_id))) {
-                virtio_error(
-                    vdev,
-                    "virtio-accel session_id SG too short; expected %zuB got %zuB",
-                    sizeof(append_sess_id), r);
-                ret = -VIRTIO_ACCEL_ERR;
-                goto out;
-            }
-
-            offset += r;
         }
 
         VADPRINTF("runtime cmd=%u session_id=%" PRIu64 " successful\n",
                   req->cmd, info->session_id);
     } else {
-        if (local_err) {
+        VADPRINTF("runtime cmd=%u failed\n", req->cmd);
+
+        if (local_err)
             error_report_err(local_err);
-        }
     }
 
-    if (ret < 0 && info->op_ret) {
-        if (req->in_data_iov[req->in_data_niov - 1].iov_len !=
-            sizeof(info->op_ret)) {
-            virtio_error(vdev,
-                         "virtio-accel req SG too short; expected %zu got %zu",
-                         sizeof(info->op_ret),
-                         req->in_data_iov[req->in_data_niov - 1].iov_len);
-            ret = -VIRTIO_ACCEL_ERR;
-        }
-
-        virtio_stl_p(vdev, req->in_data_iov[req->in_data_niov - 1].iov_base,
-                     info->op_ret);
-    }
+    if (ret < 0 && info->op_ret)
+        virtio_stl_p(vdev, in_op_ret, info->op_ret);
 
 out:
+    if (in_sess_id)
+        iov_discard_undo(&in_sess_id_undo);
+    iov_discard_undo(&in_op_ret_undo);
+
     acceldev_backend_timer_stop(vaccel->runtime, info->session_id, "do op",
                                 queue_index, &local_err);
 
@@ -227,6 +253,7 @@ static int virtio_accel_handle_req_data(VirtIOAccelReq *req)
             offset += r;
 
             gop_arg[i].len = virtio_ldl_p(vdev, &arg_h.len);
+            gop_arg[i].data_len = gop_arg[i].len;
             gop_arg[i].type = virtio_ldl_p(vdev, &arg_h.type);
             gop_arg[i].custom_type_id =
                 virtio_ldl_p(vdev, &arg_h.custom_type_id);
@@ -249,8 +276,6 @@ static int virtio_accel_handle_req_data(VirtIOAccelReq *req)
     }
 
     if (info->in_nr > 0) {
-        size_t head, tail;
-
         gop_arg = g_new0(AccelDevBackendArg, info->in_nr);
         offset = 0;
         for (i = 0; i < info->in_nr; i++) {
@@ -264,14 +289,11 @@ static int virtio_accel_handle_req_data(VirtIOAccelReq *req)
             offset += r;
 
             gop_arg[i].len = virtio_ldl_p(vdev, &arg_h.len);
+            gop_arg[i].data_len = gop_arg[i].len;
             gop_arg[i].type = virtio_ldl_p(vdev, &arg_h.type);
             gop_arg[i].custom_type_id =
                 virtio_ldl_p(vdev, &arg_h.custom_type_id);
         }
-
-        req->in_data_iov = qemu_iovec_slice(in_qiov, offset,
-                                            in_qiov->size - offset, &head,
-                                            &tail, &req->in_data_niov);
 
         for (i = 0; i < info->in_nr; i++) {
             gop_arg[i].buf = g_malloc0(gop_arg[i].len);
@@ -287,9 +309,6 @@ static int virtio_accel_handle_req_data(VirtIOAccelReq *req)
             offset += r;
         }
         info->in = gop_arg;
-    } else if (in_qiov->size > 0) {
-        req->in_data_iov = in_qiov->iov;
-        req->in_data_niov = in_qiov->niov;
     }
 
     return VIRTIO_ACCEL_OK;
