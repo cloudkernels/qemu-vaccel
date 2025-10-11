@@ -1,3 +1,3 @@
-acceldev_ss.add(files('acceldev.c'))
+virtio_accel_backend_ss.add(files('virtio-accel.c'))
 
-subdir('acceldev-vaccel')
+subdir('virtio-accel-vaccel')

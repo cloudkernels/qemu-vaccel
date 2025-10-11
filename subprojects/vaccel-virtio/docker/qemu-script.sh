@@ -26,6 +26,7 @@ dcache=none
 stderr=${RUN_PATH}/stderr.log
 
 timeout=300
+virtio_accel_debug=off
 
 log_error() {
     local error=${1:-'Unknown error'}
@@ -52,7 +53,8 @@ parse_args() {
     read -r -d '' long_opts <<-EOF || true
 	machine:,cpu:,dtb:,
 	vcpus:,ram:,rootfs:,kernel:,cmdline-append:,output-socket:,
-	net-tap::,vsock::,cmd:,timeout:,no-pci,no-kvm,drive-cache,skip-fsck
+	net-tap::,vsock::,cmd:,timeout:,no-pci,no-kvm,drive-cache,skip-fsck,
+	virtio-accel-debug
 	EOF
 
     if ! getopt=$(getopt -o "${short_opts}" --long "${long_opts}" \
@@ -163,6 +165,11 @@ parse_args() {
             skip_fsck=1
             shift
             ;;
+        '--virtio-accel-debug')
+            # Enable debug logging for virtio-accel
+            virtio_accel_debug=on
+            shift
+            ;;
         --)
             shift
             break
@@ -230,8 +237,8 @@ run_qemu() {
         -fsdev local,id=fsdev0,path=/data/data,security_model=none \
         -device "virtio-9p-${device}",fsdev=fsdev0,mount_tag=data \
         -device "virtio-rng-${device}" \
-        -object acceldev-backend-vaccel,id=rt0 \
-        -device "virtio-accel-${device}",id=accel0,runtime=rt0 \
+        -object virtio-accel-backend-vaccel,id=b0 \
+        -device "virtio-accel-${device}",id=accel0,backend=b0,debug="${virtio_accel_debug}" \
         ${extra_args} 2>"${stderr}"
 }
 

@@ -4087,7 +4087,7 @@ audio = declare_dependency(objects: libaudio.extract_all_objects(recursive: fals
 
 if libvaccel.found()
   specific_ss.add_all(vaccel_virtio.get_variable('virtio_accel_ss'))
-  system_ss.add_all(vaccel_virtio.get_variable('acceldev_ss'))
+  system_ss.add_all(vaccel_virtio.get_variable('virtio_accel_backend_ss'))
 endif
 
 ###########

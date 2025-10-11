@@ -9,20 +9,29 @@
 #include "qemu/iov.h"
 #include "qemu/main-loop.h"
 #include "qemu/module.h"
-
-#include "hw/virtio/virtio-accel.h"
 #include "standard-headers/linux/virtio_ids.h"
 
+#include "hw/virtio/virtio-accel.h"
+#include "standard-headers/linux/virtio_accel.h"
+#include "system/virtio-accel-backend.h"
+
 #define VIRTIO_ACCEL_VM_VERSION 1
+#define CHUNK_TIMEOUT_DEFAULT 5000
 
-// FIXME: move this to conf
-#define CHUNK_TIMEOUT_MS 5000
+#define VADPRINTF(fmt, ...)                                       \
+    do {                                                          \
+        if (debug_enabled) {                                      \
+            fprintf(stderr, "virtio_accel: " fmt, ##__VA_ARGS__); \
+        }                                                         \
+    } while (0)
 
-static void virtio_accel_init_request(VirtIOAccelReq *req, VirtIOAccel *vaccel,
+static bool debug_enabled = false;
+
+static void virtio_accel_init_request(VirtIOAccelRequest *req, VirtIOAccel *va,
                                       VirtQueue *vq)
 {
     req->vq = vq;
-    req->vaccel = vaccel;
+    req->dev = va;
 
     memset(&req->hdr, 0x00, sizeof(req->hdr));
     qemu_iovec_init_external(&req->out_qiov, NULL, 0);
@@ -37,18 +46,18 @@ static void virtio_accel_init_request(VirtIOAccelReq *req, VirtIOAccel *vaccel,
     req->chunk_timer = NULL;
 
     req->cmd = 0;
-    memset(&req->info, 0x00, sizeof(req->info));
+    memset(&req->op, 0x00, sizeof(req->op));
 }
 
-static void virtio_accel_free_request(VirtIOAccelReq *req)
+static void virtio_accel_free_request(VirtIOAccelRequest *req)
 {
     if (req->hdr.cmd == VIRTIO_ACCEL_CMD_CREATE_SESSION ||
         req->hdr.cmd == VIRTIO_ACCEL_CMD_DO_OP ||
         req->hdr.cmd == VIRTIO_ACCEL_CMD_GET_TIMERS) {
-        if (req->info.out)
-            g_free(req->info.out);
-        if (req->info.in)
-            g_free(req->info.in);
+        if (req->op.out)
+            g_free(req->op.out);
+        if (req->op.in)
+            g_free(req->op.in);
     }
 
     if (req->out_qiov.nalloc != -1) {
@@ -56,37 +65,39 @@ static void virtio_accel_free_request(VirtIOAccelReq *req)
          * external iovec */
         qemu_iovec_destroy(&req->out_qiov);
     }
-    if (req->in_qiov.nalloc != -1) {
+    if (req->in_qiov.nalloc != -1)
         qemu_iovec_destroy(&req->in_qiov);
-    }
 
+    timer_free(req->chunk_timer);
     if (req->chunk_reqs)
         g_free(req->chunk_reqs);
     if (req)
         g_free(req);
 }
 
-static void virtio_accel_complete_request(VirtIOAccelReq *req, int ret)
+static void virtio_accel_complete_request(VirtIOAccelRequest *req, int ret)
 {
-    VirtIOAccel *vaccel = req->vaccel;
-    VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
+    VirtIOAccel *va = req->dev;
+    VirtIODevice *vdev = VIRTIO_DEVICE(va);
     uint8_t status;
 
     if (ret < 0)
         status = (uint8_t)-ret;
     else
         status = (uint8_t)ret;
-
     stb_p(req->in_status, status);
+
+    iov_discard_undo(&req->out_hdr_undo);
+    iov_discard_undo(&req->in_status_undo);
     virtqueue_push(req->vq, &req->elem, req->in_iov_len);
     virtio_notify(vdev, req->vq);
 }
 
-static void virtio_accel_finalize_request(VirtIOAccelReq *req, int ret)
+static void virtio_accel_finalize_request(VirtIOAccelRequest *req, int ret)
 {
     uint32_t received_chunks = qatomic_read(&req->received_chunks);
     for (uint32_t i = 1; i < received_chunks; i++) {
-        VirtIOAccelReq *chunk = req->chunk_reqs[i];
+        VirtIOAccelRequest *chunk = req->chunk_reqs[i];
 
         virtqueue_push(chunk->vq, &chunk->elem, 0);
         virtio_accel_free_request(chunk);
@@ -96,12 +107,12 @@ static void virtio_accel_finalize_request(VirtIOAccelReq *req, int ret)
     virtio_accel_free_request(req);
 }
 
-static int virtio_accel_handle_cmd(VirtIOAccelReq *req)
+static int virtio_accel_handle_cmd(VirtIOAccelRequest *req)
 {
-    VirtIOAccel *vaccel = req->vaccel;
-    VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
-    int queue_index = virtio_get_queue_index(req->vq);
-    AccelDevBackendOpInfo *info = &req->info;
+    VirtIOAccel *va = req->dev;
+    VirtIODevice *vdev = VIRTIO_DEVICE(va);
+    VirtIOAccelBackend *backend = va->backend;
+    VirtIOAccelBackendOp *op = &req->op;
     struct iovec *in_iov = req->in_qiov.iov;
     unsigned int in_niov = req->in_qiov.niov;
     int64_t ret = -VIRTIO_ACCEL_ERR;
@@ -110,16 +121,16 @@ static int virtio_accel_handle_cmd(VirtIOAccelReq *req)
     uint64_t *in_sess_id = NULL;
     IOVDiscardUndo in_op_ret_undo;
     IOVDiscardUndo in_sess_id_undo;
-    struct virtio_accel_arg_hdr arg_h;
+    struct virtio_accel_arg_header arg_h;
     size_t r;
     size_t offset = 0;
 
-    VADPRINTF("handle request cmd=%u, op_code=%u\n", req->cmd, info->op_code);
+    VADPRINTF("handle cmd=%u, op_code=%u\n", req->cmd, op->op_code);
 
-    if (in_iov[in_niov - 1].iov_len != sizeof(info->op_ret)) {
+    if (in_iov[in_niov - 1].iov_len < sizeof(op->op_ret)) {
         virtio_error(vdev,
                      "virtio-accel ret SG too short; expected %zu got %zu",
-                     sizeof(info->op_ret), in_iov[in_niov - 1].iov_len);
+                     sizeof(op->op_ret), in_iov[in_niov - 1].iov_len);
         return -VIRTIO_ACCEL_BADMSG;
     }
 
@@ -129,7 +140,7 @@ static int virtio_accel_handle_cmd(VirtIOAccelReq *req)
 
     switch (req->cmd) {
     case VIRTIO_ACCEL_CMD_CREATE_SESSION:
-        if (in_iov[in_niov - 1].iov_len != sizeof(*in_sess_id)) {
+        if (in_iov[in_niov - 1].iov_len < sizeof(*in_sess_id)) {
             virtio_error(
                 vdev,
                 "virtio-accel session_id SG too short; expected %zuB got %zuB",
@@ -142,22 +153,19 @@ static int virtio_accel_handle_cmd(VirtIOAccelReq *req)
         iov_discard_back_undoable(in_iov, &in_niov, in_iov[in_niov - 1].iov_len,
                                   &in_sess_id_undo);
 
-        ret = acceldev_backend_create_session(vaccel->runtime, info,
-                                              queue_index, &local_err);
+        ret = virtio_accel_backend_create_session(backend, op, &local_err);
         break;
     case VIRTIO_ACCEL_CMD_DO_OP:
-        acceldev_backend_timer_start(vaccel->runtime, info->session_id, "do op",
-                                     queue_index, &local_err);
-        ret = acceldev_backend_operation(vaccel->runtime, info, queue_index,
+        virtio_accel_backend_timer_start(backend, op->session_id, "do op",
                                          &local_err);
+        ret = virtio_accel_backend_operation(backend, op, &local_err);
         break;
     case VIRTIO_ACCEL_CMD_DESTROY_SESSION:
-        ret = acceldev_backend_destroy_session(
-            vaccel->runtime, info->session_id, queue_index, &local_err);
+        ret = virtio_accel_backend_destroy_session(backend, op->session_id,
+                                                   &local_err);
         break;
     case VIRTIO_ACCEL_CMD_GET_TIMERS:
-        ret = acceldev_backend_get_timers(vaccel->runtime, info, queue_index,
-                                          &local_err);
+        ret = virtio_accel_backend_get_timers(backend, op, &local_err);
         break;
     default:
         error_report("virtio-accel unsupported cmd: %u", req->cmd);
@@ -166,11 +174,10 @@ static int virtio_accel_handle_cmd(VirtIOAccelReq *req)
     }
 
     if (ret >= 0) {
-        for (uint32_t i = 0; i < info->in_nr; i++) {
-            virtio_stl_p(vdev, &arg_h.len, info->in[i].data_len);
-            virtio_stl_p(vdev, &arg_h.type, info->in[i].type);
-            virtio_stl_p(vdev, &arg_h.custom_type_id,
-                         info->in[i].custom_type_id);
+        for (uint32_t i = 0; i < op->nr_in; i++) {
+            virtio_stl_p(vdev, &arg_h.len, op->in[i].data_len);
+            virtio_stl_p(vdev, &arg_h.type, op->in[i].type);
+            virtio_stl_p(vdev, &arg_h.custom_type_id, op->in[i].custom_type_id);
 
             r = iov_from_buf(in_iov, in_niov, offset, &arg_h, sizeof(arg_h));
             if (unlikely(r != sizeof(arg_h))) {
@@ -183,14 +190,14 @@ static int virtio_accel_handle_cmd(VirtIOAccelReq *req)
             offset += r;
         }
 
-        for (uint32_t i = 0; i < info->in_nr; i++) {
-            r = iov_from_buf(in_iov, in_niov, offset, info->in[i].buf,
-                             info->in[i].len);
-            if (unlikely(r != info->in[i].len)) {
+        for (uint32_t i = 0; i < op->nr_in; i++) {
+            r = iov_from_buf(in_iov, in_niov, offset, op->in[i].buf,
+                             op->in[i].len);
+            if (unlikely(r != op->in[i].len)) {
                 virtio_error(
                     vdev,
                     "virtio-accel in[%d] too short; expected %uB got %zuB", i,
-                    info->in[i].len, r);
+                    op->in[i].len, r);
                 ret = -VIRTIO_ACCEL_BADMSG;
                 goto out;
             }
@@ -203,46 +210,45 @@ static int virtio_accel_handle_cmd(VirtIOAccelReq *req)
             ret = 0;
         }
 
-        VADPRINTF("runtime cmd=%u session_id=%" PRIu64 " successful\n",
-                  req->cmd, info->session_id);
+        VADPRINTF("cmd session_id=%" PRIu64 " successful\n", op->session_id);
     } else {
-        VADPRINTF("runtime cmd=%u failed\n", req->cmd);
+        VADPRINTF("cmd failed\n");
 
         if (local_err)
             error_report_err(local_err);
     }
 
-    if (ret < 0 && info->op_ret)
-        virtio_stl_p(vdev, in_op_ret, info->op_ret);
+    if (ret < 0 && op->op_ret)
+        virtio_stl_p(vdev, in_op_ret, op->op_ret);
 
 out:
     if (in_sess_id)
         iov_discard_undo(&in_sess_id_undo);
     iov_discard_undo(&in_op_ret_undo);
 
-    acceldev_backend_timer_stop(vaccel->runtime, info->session_id, "do op",
-                                queue_index, &local_err);
+    virtio_accel_backend_timer_stop(backend, op->session_id, "do op",
+                                    &local_err);
 
     return ret;
 }
 
-static int virtio_accel_handle_req_data(VirtIOAccelReq *req)
+static int virtio_accel_handle_req_data(VirtIOAccelRequest *req)
 {
-    VirtIOAccel *vaccel = req->vaccel;
-    VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
+    VirtIOAccel *va = req->dev;
+    VirtIODevice *vdev = VIRTIO_DEVICE(va);
     QEMUIOVector *out_qiov = &req->out_qiov;
     QEMUIOVector *in_qiov = &req->in_qiov;
-    AccelDevBackendOpInfo *info = &req->info;
-    struct virtio_accel_arg_hdr arg_h;
-    AccelDevBackendArg *gop_arg;
+    VirtIOAccelBackendOp *op = &req->op;
+    struct virtio_accel_arg_header arg_h;
+    VirtIOAccelBackendArg *gop_arg;
     size_t offset;
     size_t r;
     int i;
 
-    if (info->out_nr > 0) {
-        gop_arg = g_new0(AccelDevBackendArg, info->out_nr);
+    if (op->nr_out > 0) {
+        gop_arg = g_new0(VirtIOAccelBackendArg, op->nr_out);
         offset = 0;
-        for (i = 0; i < info->out_nr; i++) {
+        for (i = 0; i < op->nr_out; i++) {
             r = iov_to_buf(out_qiov->iov, out_qiov->niov, offset, &arg_h,
                            sizeof(arg_h));
             if (unlikely(r != sizeof(arg_h))) {
@@ -259,7 +265,7 @@ static int virtio_accel_handle_req_data(VirtIOAccelReq *req)
                 virtio_ldl_p(vdev, &arg_h.custom_type_id);
         }
 
-        for (i = 0; i < info->out_nr; i++) {
+        for (i = 0; i < op->nr_out; i++) {
             gop_arg[i].buf = g_malloc0(gop_arg[i].len);
             r = iov_to_buf(out_qiov->iov, out_qiov->niov, offset,
                            gop_arg[i].buf, gop_arg[i].len);
@@ -272,13 +278,13 @@ static int virtio_accel_handle_req_data(VirtIOAccelReq *req)
             }
             offset += r;
         }
-        info->out = gop_arg;
+        op->out = gop_arg;
     }
 
-    if (info->in_nr > 0) {
-        gop_arg = g_new0(AccelDevBackendArg, info->in_nr);
+    if (op->nr_in > 0) {
+        gop_arg = g_new0(VirtIOAccelBackendArg, op->nr_in);
         offset = 0;
-        for (i = 0; i < info->in_nr; i++) {
+        for (i = 0; i < op->nr_in; i++) {
             r = iov_to_buf(in_qiov->iov, in_qiov->niov, offset, &arg_h,
                            sizeof(arg_h));
             if (unlikely(r != sizeof(arg_h))) {
@@ -295,7 +301,7 @@ static int virtio_accel_handle_req_data(VirtIOAccelReq *req)
                 virtio_ldl_p(vdev, &arg_h.custom_type_id);
         }
 
-        for (i = 0; i < info->in_nr; i++) {
+        for (i = 0; i < op->nr_in; i++) {
             gop_arg[i].buf = g_malloc0(gop_arg[i].len);
             r = iov_to_buf(in_qiov->iov, in_qiov->niov, offset, gop_arg[i].buf,
                            gop_arg[i].len);
@@ -308,56 +314,55 @@ static int virtio_accel_handle_req_data(VirtIOAccelReq *req)
             }
             offset += r;
         }
-        info->in = gop_arg;
+        op->in = gop_arg;
     }
 
     return VIRTIO_ACCEL_OK;
 }
 
-static void virtio_accel_handle_req_hdr(VirtIOAccelReq *req)
+static void virtio_accel_handle_req_hdr(VirtIOAccelRequest *req)
 {
-    VirtIOAccel *vaccel = req->vaccel;
-    VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
-    AccelDevBackendOpInfo *info = &req->info;
-    struct virtio_accel_hdr *h = &req->hdr;
+    VirtIOAccel *va = req->dev;
+    VirtIODevice *vdev = VIRTIO_DEVICE(va);
+    VirtIOAccelBackendOp *op = &req->op;
+    struct virtio_accel_header *h = &req->hdr;
 
     req->cmd = virtio_ldl_p(vdev, &h->cmd);
     req->request_id = virtio_ldq_p(vdev, &h->request_id);
     req->total_chunks = virtio_ldl_p(vdev, &h->total_chunks);
 
-    info->op_code = virtio_ldl_p(vdev, &h->op_code);
-    info->session_id = virtio_ldq_p(vdev, &h->session_id);
-    info->out_nr = virtio_ldl_p(vdev, &h->out_nr);
-    info->in_nr = virtio_ldl_p(vdev, &h->in_nr);
-    info->op_ret = 0;
+    op->op_code = virtio_ldl_p(vdev, &h->op_code);
+    op->session_id = virtio_ldq_p(vdev, &h->session_id);
+    op->nr_out = virtio_ldl_p(vdev, &h->nr_out);
+    op->nr_in = virtio_ldl_p(vdev, &h->nr_in);
+    op->op_ret = 0;
 }
 
-static VirtIOAccelReq *get_pending_req(uint64_t request_id, VirtIOAccel *vaccel)
+static VirtIOAccelRequest *get_pending_req(uint64_t request_id, VirtIOAccel *va)
 {
-    VirtIOAccelReq *req;
+    VirtIOAccelRequest *req;
 
-    QTAILQ_FOREACH(req, &vaccel->pending_reqs, next)
+    QTAILQ_FOREACH(req, &va->pending_reqs, next)
     {
-        if (req->request_id == request_id) {
+        if (req->request_id == request_id)
             return req;
-        }
     }
     return NULL;
 }
 
 static void chunked_req_timeout(void *opaque)
 {
-    VirtIOAccelReq *req = opaque;
-    VirtIOAccel *vaccel = req->vaccel;
+    VirtIOAccelRequest *req = opaque;
+    VirtIOAccel *va = req->dev;
 
-    qemu_mutex_lock(&vaccel->pending_mutex);
-    QTAILQ_REMOVE(&vaccel->pending_reqs, req, next);
-    qemu_mutex_unlock(&vaccel->pending_mutex);
+    qemu_mutex_lock(&va->pending_mutex);
+    QTAILQ_REMOVE(&va->pending_reqs, req, next);
+    qemu_mutex_unlock(&va->pending_mutex);
 
     virtio_accel_finalize_request(req, VIRTIO_ACCEL_ERR);
 }
 
-static void merge_req_chunks(VirtIOAccelReq *req)
+static void merge_req_chunks(VirtIOAccelRequest *req)
 {
     QEMUIOVector *out_qiov = &req->out_qiov;
     QEMUIOVector *in_qiov = &req->in_qiov;
@@ -407,29 +412,30 @@ static void merge_req_chunks(VirtIOAccelReq *req)
         iov_size(req->in_qiov.iov, req->in_qiov.niov) + sizeof(*req->in_status);
 }
 
-static VirtIOAccelReq *virtio_accel_handle_chunk(VirtIOAccelReq *req)
+static VirtIOAccelRequest *virtio_accel_handle_chunk(VirtIOAccelRequest *req)
 {
-    VirtIOAccel *vaccel = req->vaccel;
+    VirtIOAccel *va = req->dev;
+    VirtIOAccelConfig *config = &va->config;
     uint32_t received_chunks;
 
-    qemu_mutex_lock(&vaccel->pending_mutex);
-    VirtIOAccelReq *parent_req = get_pending_req(req->request_id, vaccel);
+    qemu_mutex_lock(&va->pending_mutex);
+    VirtIOAccelRequest *parent_req = get_pending_req(req->request_id, va);
     if (!parent_req) {
-        QTAILQ_INSERT_TAIL(&vaccel->pending_reqs, req, next);
+        QTAILQ_INSERT_TAIL(&va->pending_reqs, req, next);
         parent_req = req;
     }
-    qemu_mutex_unlock(&vaccel->pending_mutex);
+    qemu_mutex_unlock(&va->pending_mutex);
 
     if (parent_req == req) {
         parent_req->chunk_reqs =
-            g_new0(VirtIOAccelReq *, parent_req->total_chunks);
+            g_new0(VirtIOAccelRequest *, parent_req->total_chunks);
 
         parent_req->chunk_timer =
             timer_new_ms(QEMU_CLOCK_VIRTUAL, chunked_req_timeout, req);
     }
 
     timer_mod(parent_req->chunk_timer,
-              qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + CHUNK_TIMEOUT_MS);
+              qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + config->chunk_timeout);
 
     received_chunks = qatomic_fetch_inc(&parent_req->received_chunks);
     parent_req->chunk_reqs[received_chunks] = req;
@@ -441,28 +447,27 @@ static VirtIOAccelReq *virtio_accel_handle_chunk(VirtIOAccelReq *req)
 
     merge_req_chunks(parent_req);
 
-    qemu_mutex_lock(&vaccel->pending_mutex);
-    QTAILQ_REMOVE(&vaccel->pending_reqs, parent_req, next);
-    qemu_mutex_unlock(&vaccel->pending_mutex);
+    qemu_mutex_lock(&va->pending_mutex);
+    QTAILQ_REMOVE(&va->pending_reqs, parent_req, next);
+    qemu_mutex_unlock(&va->pending_mutex);
 
     return parent_req;
 }
 
-static int virtio_accel_handle_request(VirtIOAccelReq *req)
+static int virtio_accel_handle_request(VirtIOAccelRequest *req)
 {
-    VirtIOAccel *vaccel = req->vaccel;
-    VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
+    VirtIOAccel *va = req->dev;
+    VirtIODevice *vdev = VIRTIO_DEVICE(va);
+    VirtIOAccelBackend *backend = va->backend;
     VirtQueueElement *elem = &req->elem;
     struct iovec *out_iov = elem->out_sg;
     struct iovec *in_iov = elem->in_sg;
     unsigned out_num = elem->out_num;
     unsigned in_num = elem->in_num;
-    int queue_index = virtio_get_queue_index(req->vq);
     Error *local_err = NULL;
     uint8_t status = VIRTIO_ACCEL_OK;
     size_t r;
     int ret;
-    int i;
 
     if (out_num < 1 || in_num < 1) {
         virtio_error(
@@ -474,13 +479,6 @@ static int virtio_accel_handle_request(VirtIOAccelReq *req)
 
     VADPRINTF("handle request out_num=%u, in_num=%u\n", out_num, in_num);
 
-    for (i = 0; i < out_num; i++) {
-        VADPRINTF("out_iov[%d].len: %zu\n", i, out_iov[i].iov_len);
-    }
-    for (i = 0; i < in_num; i++) {
-        VADPRINTF("in_iov[%d].len: %zu\n", i, in_iov[i].iov_len);
-    }
-
     r = iov_to_buf(out_iov, out_num, 0, &req->hdr, sizeof(req->hdr));
     if (unlikely(r != sizeof(req->hdr))) {
         virtio_error(
@@ -488,23 +486,25 @@ static int virtio_accel_handle_request(VirtIOAccelReq *req)
             sizeof(req->hdr), r);
         return -1;
     }
-    iov_discard_front(&out_iov, &out_num, sizeof(req->hdr));
+    iov_discard_front_undoable(&out_iov, &out_num, sizeof(req->hdr),
+                               &req->out_hdr_undo);
 
     virtio_accel_handle_req_hdr(req);
 
     if (req->cmd == VIRTIO_ACCEL_CMD_DO_OP) {
-        acceldev_backend_timer_start(vaccel->runtime, req->info.session_id,
-                                     "prepare header", queue_index, &local_err);
+        virtio_accel_backend_timer_start(backend, req->op.session_id,
+                                         "prepare header", &local_err);
     }
 
-    VADPRINTF("handle request id=%" PRId64 " session_id=%" PRId64 "\n",
-              req->request_id, req->info.session_id);
+    VADPRINTF("request id=%" PRId64 " session_id=%" PRId64 "\n",
+              req->request_id, req->op.session_id);
 
-    if (in_iov[in_num - 1].iov_len != sizeof(status)) {
+    if (in_iov[in_num - 1].iov_len < sizeof(status)) {
         virtio_error(
             vdev,
             "virtio-accel incorrect request status size; expected %zu got %zu",
             sizeof(status), in_iov[in_num - 1].iov_len);
+        iov_discard_undo(&req->out_hdr_undo);
         return -1;
     }
 
@@ -512,25 +512,25 @@ static int virtio_accel_handle_request(VirtIOAccelReq *req)
     req->in_iov_len = iov_size(in_iov, in_num);
     req->in_status = (void *)in_iov[in_num - 1].iov_base +
                      in_iov[in_num - 1].iov_len - sizeof(*req->in_status);
-    iov_discard_back(in_iov, &in_num, sizeof(*req->in_status));
+    iov_discard_back_undoable(in_iov, &in_num, sizeof(*req->in_status),
+                              &req->in_status_undo);
 
     qemu_iovec_init_external(&req->out_qiov, out_iov, out_num);
     qemu_iovec_init_external(&req->in_qiov, in_iov, in_num);
 
     if (req->request_id > 0) {
-        req = virtio_accel_handle_chunk(req);
-        VADPRINTF("handle chunked request received: %u, total: %u\n",
-                  qatomic_read(&req->received_chunks), req->total_chunks);
-        if (req->received_chunks < req->total_chunks)
-            return 0;
-
+        VirtIOAccelRequest *chunk = req;
         VADPRINTF("handle chunked request out_num=%u, in_num=%u\n", out_num,
                   in_num);
-        for (i = 0; i < out_num; i++) {
-            VADPRINTF("chunked out_iov[%d].len: %zu\n", i, out_iov[i].iov_len);
-        }
-        for (i = 0; i < in_num; i++) {
-            VADPRINTF("chunked in_iov[%d].len: %zu\n", i, in_iov[i].iov_len);
+
+        req = virtio_accel_handle_chunk(chunk);
+        VADPRINTF("chunked request received=%u, total=%u\n",
+                  qatomic_read(&req->received_chunks), req->total_chunks);
+
+        if (req->received_chunks < req->total_chunks) {
+            iov_discard_undo(&chunk->out_hdr_undo);
+            iov_discard_undo(&chunk->in_status_undo);
+            return 0;
         }
     }
 
@@ -538,12 +538,14 @@ static int virtio_accel_handle_request(VirtIOAccelReq *req)
     if (ret)
         goto out;
 
-    acceldev_backend_timer_stop(vaccel->runtime, req->info.session_id,
-                                "prepare header", queue_index, &local_err);
+    virtio_accel_backend_timer_stop(backend, req->op.session_id,
+                                    "prepare header", &local_err);
 
     ret = virtio_accel_handle_cmd(req);
     if (ret == -EFAULT) {
         /* Serious errors, need to reset virtio accel device */
+        iov_discard_undo(&req->out_hdr_undo);
+        iov_discard_undo(&req->in_status_undo);
         return -1;
     }
 
@@ -552,9 +554,10 @@ out:
     return 0;
 }
 
-static VirtIOAccelReq *virtio_accel_get_request(VirtIOAccel *va, VirtQueue *vq)
+static VirtIOAccelRequest *virtio_accel_get_request(VirtIOAccel *va,
+                                                    VirtQueue *vq)
 {
-    VirtIOAccelReq *req = virtqueue_pop(vq, sizeof(VirtIOAccelReq));
+    VirtIOAccelRequest *req = virtqueue_pop(vq, sizeof(VirtIOAccelRequest));
 
     if (req) {
         virtio_accel_init_request(req, va, vq);
@@ -564,10 +567,10 @@ static VirtIOAccelReq *virtio_accel_get_request(VirtIOAccel *va, VirtQueue *vq)
 
 static void virtio_accel_handle_dataq(VirtIODevice *vdev, VirtQueue *vq)
 {
-    VirtIOAccel *vaccel = VIRTIO_ACCEL(vdev);
-    VirtIOAccelReq *req;
+    VirtIOAccel *va = VIRTIO_ACCEL(vdev);
+    VirtIOAccelRequest *req;
 
-    while ((req = virtio_accel_get_request(vaccel, vq))) {
+    while ((req = virtio_accel_get_request(va, vq))) {
         if (virtio_accel_handle_request(req) < 0) {
             virtqueue_detach_element(req->vq, &req->elem, 0);
             virtio_accel_free_request(req);
@@ -579,27 +582,24 @@ static void virtio_accel_handle_dataq(VirtIODevice *vdev, VirtQueue *vq)
 static void virtio_accel_dataq_bh_callback(void *opaque)
 {
     VirtIOAccelQueue *q = opaque;
-    VirtIOAccel *vaccel = q->vaccel;
-    VirtIODevice *vdev = VIRTIO_DEVICE(vaccel);
+    VirtIOAccel *va = q->dev;
+    VirtIODevice *vdev = VIRTIO_DEVICE(va);
 
     /* This happens when device was stopped but BH wasn't. */
-    if (!vdev->vm_running) {
+    if (!vdev->vm_running)
         return;
-    }
 
     /* Just in case the driver is not ready on more */
-    if (unlikely(!(vdev->status & VIRTIO_CONFIG_S_DRIVER_OK))) {
+    if (unlikely(!(vdev->status & VIRTIO_CONFIG_S_DRIVER_OK)))
         return;
-    }
 
     for (;;) {
         virtio_accel_handle_dataq(vdev, q->dataq);
         virtio_queue_set_notification(q->dataq, 1);
 
         /* Are we done or did the guest add more buffers? */
-        if (virtio_queue_empty(q->dataq)) {
+        if (virtio_queue_empty(q->dataq))
             break;
-        }
 
         virtio_queue_set_notification(q->dataq, 0);
     }
@@ -607,13 +607,13 @@ static void virtio_accel_dataq_bh_callback(void *opaque)
 
 static void virtio_accel_dataq_callback(VirtIODevice *vdev, VirtQueue *vq)
 {
-    VirtIOAccel *vaccel = VIRTIO_ACCEL(vdev);
-    VirtIOAccelQueue *q = &vaccel->vqs[virtio_get_queue_index(vq)];
+    VirtIOAccel *va = VIRTIO_ACCEL(vdev);
+    VirtIOAccelQueue *q = &va->vqs[virtio_get_queue_index(vq)];
 
     /* This happens when device was stopped but VCPU wasn't. */
-    if (!vdev->vm_running) {
+    if (!vdev->vm_running)
         return;
-    }
+
     virtio_queue_set_notification(vq, 0);
     qemu_bh_schedule(q->dataq_bh);
 }
@@ -624,102 +624,104 @@ static uint64_t virtio_accel_get_features(VirtIODevice *vdev, uint64_t features,
     return features;
 }
 
-static void virtio_accel_reset(VirtIODevice *vdev)
-{
-    VirtIOAccel *vaccel = VIRTIO_ACCEL(vdev);
-    /* multiqueue is disabled by default */
-    vaccel->curr_queue = 1;
-    if (!acceldev_backend_is_ready(vaccel->runtime)) {
-        vaccel->status &= ~VIRTIO_ACCEL_S_HW_READY;
-    } else {
-        vaccel->status |= VIRTIO_ACCEL_S_HW_READY;
-    }
-}
-
-static void virtio_accel_init_config(VirtIODevice *vdev)
-{
-    //VirtIOAccel *vaccel = VIRTIO_ACCEL(vdev);
-
-    // FIXME
-    //vaccel->conf.services =
-    //              vaccel->conf.crypto->conf.services;
-    //vaccel->conf.max_size = vaccel->conf.crypto->conf.max_size;
-    //
-}
-
 static void virtio_accel_device_realize(DeviceState *dev, Error **errp)
 {
     VirtIODevice *vdev = VIRTIO_DEVICE(dev);
-    VirtIOAccel *vaccel = VIRTIO_ACCEL(dev);
+    VirtIOAccel *va = VIRTIO_ACCEL(dev);
+    VirtIOAccelConfig *config = &va->config;
     int i;
 
-    vaccel->runtime = vaccel->conf.runtime;
-    if (vaccel->runtime == NULL) {
-        error_setg(errp, "'runtime' parameter expects a valid object");
+    va->backend = config->backend;
+    if (va->backend == NULL) {
+        error_setg(errp, "'backend' parameter expects a valid object");
         return;
-    } else if (acceldev_backend_is_used(vaccel->runtime)) {
+    } else if (virtio_accel_backend_is_used(va->backend)) {
         error_setg(
-            errp, "can't use already used accel backend: %s",
-            object_get_canonical_path_component(OBJECT(vaccel->conf.runtime)));
+            errp, "Cannot use already used virtio-accel backend: %s",
+            object_get_canonical_path_component(OBJECT(config->backend)));
         return;
     }
 
-    vaccel->max_queues = MAX(vaccel->runtime->conf.peers.queues, 1);
-    if (vaccel->max_queues + 1 > VIRTIO_QUEUE_MAX) {
+    debug_enabled = config->debug;
+
+    if (config->chunk_timeout < 1000) {
         error_setg(errp,
-                   "Invalid number of queues (= %" PRIu32 "), "
-                   "must be a positive integer less than %d.",
-                   vaccel->max_queues, VIRTIO_QUEUE_MAX);
+                   "Invalid chunk-timeout property (%" PRIu32 "); "
+                   "must be >= 1000",
+                   config->chunk_timeout);
         return;
     }
 
-    virtio_init(vdev, VIRTIO_ID_ACCEL, vaccel->config_size);
-    vaccel->curr_queue = 1;
-    vaccel->vqs = g_new0(VirtIOAccelQueue, vaccel->max_queues);
-    for (i = 0; i < vaccel->max_queues; i++) {
-        vaccel->vqs[i].dataq = virtio_add_queue(vdev, VIRTQUEUE_MAX_SIZE,
-                                                virtio_accel_dataq_callback);
-        vaccel->vqs[i].dataq_bh =
-            qemu_bh_new(virtio_accel_dataq_bh_callback, &vaccel->vqs[i]);
-        vaccel->vqs[i].vaccel = vaccel;
+    if (config->num_queues != 1) {
+        error_setg(errp, "Only a single virtqueue is supported");
+        return;
     }
 
-    if (!acceldev_backend_is_ready(vaccel->runtime)) {
-        vaccel->status &= ~VIRTIO_ACCEL_S_HW_READY;
-    } else {
-        vaccel->status |= VIRTIO_ACCEL_S_HW_READY;
+    if (config->queue_size <= 2) {
+        error_setg(errp,
+                   "Invalid queue-size property (%" PRIu16 "); "
+                   "must be > 2",
+                   config->queue_size);
+        return;
+    }
+    if (!is_power_of_2(config->queue_size) ||
+        config->queue_size > VIRTQUEUE_MAX_SIZE) {
+        error_setg(errp,
+                   "Invalid queue-size property (%" PRIu16 "); "
+                   "must be a power of 2 (max %d)",
+                   config->queue_size, VIRTQUEUE_MAX_SIZE);
+        return;
     }
 
-    virtio_accel_init_config(vdev);
-    acceldev_backend_set_used(vaccel->runtime, true);
+    if (config->max_req_descriptors > config->queue_size) {
+        error_setg(errp,
+                   "Invalid max-req-descriptors property (%" PRIu16 "); "
+                   "cannot be > queue-size property",
+                   config->max_req_descriptors);
+        return;
+    }
 
-    if (virtio_vdev_has_feature(vdev, VIRTIO_F_RING_PACKED))
-        VADPRINTF("HAS VIRTIO_F_RING_PACKED\n");
-    else
-        VADPRINTF("NO VIRTIO_F_RING_PACKED\n");
+    virtio_init(vdev, VIRTIO_ID_ACCEL, va->config_size);
 
-    qemu_mutex_init(&vaccel->pending_mutex);
-    QTAILQ_INIT(&vaccel->pending_reqs);
+    va->vqs = g_new0(VirtIOAccelQueue, config->num_queues);
+    for (i = 0; i < config->num_queues; i++) {
+        va->vqs[i].dataq = virtio_add_queue(vdev, config->queue_size,
+                                            virtio_accel_dataq_callback);
+        va->vqs[i].dataq_bh =
+            qemu_bh_new(virtio_accel_dataq_bh_callback, &va->vqs[i]);
+        va->vqs[i].dev = va;
+    }
+
+    virtio_accel_backend_set_used(va->backend, true);
+
+    qemu_mutex_init(&va->pending_mutex);
+    QTAILQ_INIT(&va->pending_reqs);
 }
 
 static void virtio_accel_device_unrealize(DeviceState *dev)
 {
     VirtIODevice *vdev = VIRTIO_DEVICE(dev);
-    VirtIOAccel *vaccel = VIRTIO_ACCEL(dev);
-    VirtIOAccelQueue *q;
-    int i, max_queues;
+    VirtIOAccel *va = VIRTIO_ACCEL(dev);
+    VirtIOAccelConfig *config = &va->config;
+    VirtIOAccelRequest *req;
 
-    max_queues = vaccel->multiqueue ? vaccel->max_queues : 1;
-    for (i = 0; i < max_queues; i++) {
-        virtio_delete_queue(vaccel->vqs[i].dataq);
-        q = &vaccel->vqs[i];
-        qemu_bh_delete(q->dataq_bh);
+    qemu_mutex_lock(&va->pending_mutex);
+    QTAILQ_FOREACH(req, &va->pending_reqs, next)
+    {
+        QTAILQ_REMOVE(&va->pending_reqs, req, next);
+        virtio_accel_free_request(req);
     }
+    qemu_mutex_unlock(&va->pending_mutex);
+    qemu_mutex_destroy(&va->pending_mutex);
 
-    g_free(vaccel->vqs);
+    for (uint16_t i = 0; i < config->num_queues; i++) {
+        virtio_delete_queue(va->vqs[i].dataq);
+        qemu_bh_delete(va->vqs[i].dataq_bh);
+    }
+    g_free(va->vqs);
 
     virtio_cleanup(vdev);
-    acceldev_backend_set_used(vaccel->runtime, false);
+    virtio_accel_backend_set_used(va->backend, false);
 }
 
 static const VMStateDescription vmstate_virtio_accel = {
@@ -732,27 +734,38 @@ static const VMStateDescription vmstate_virtio_accel = {
 
 static const Property virtio_accel_properties[] = {
 
-    DEFINE_PROP_LINK("runtime", VirtIOAccel, conf.runtime,
-                     TYPE_ACCELDEV_BACKEND, AccelDevBackend *),
+    DEFINE_PROP_LINK("backend", VirtIOAccel, config.backend,
+                     TYPE_VIRTIO_ACCEL_BACKEND, VirtIOAccelBackend *),
+    DEFINE_PROP_BOOL("debug", VirtIOAccel, config.debug, false),
+    DEFINE_PROP_UINT32("chunk-timeout", VirtIOAccel, config.chunk_timeout,
+                       CHUNK_TIMEOUT_DEFAULT),
+    DEFINE_PROP_UINT16("num-queues", VirtIOAccel, config.num_queues, 1),
+    DEFINE_PROP_UINT16("queue-size", VirtIOAccel, config.queue_size,
+                       VIRTQUEUE_MAX_SIZE),
+    DEFINE_PROP_UINT16("max-req-descriptors", VirtIOAccel,
+                       config.max_req_descriptors, VIRTQUEUE_MAX_SIZE),
 };
 
 static void virtio_accel_get_config(VirtIODevice *vdev, uint8_t *config)
 {
     VirtIOAccel *va = VIRTIO_ACCEL(vdev);
-    struct virtio_accel_conf cfg = {};
+    struct virtio_accel_config cfg;
 
-    // TODO:
-    /*
-     * Virtio-crypto device conforms to VIRTIO 1.0 which is always LE,
-     * so we can use LE accessors directly.
-     */
-    //
-    stl_le_p(&cfg.status, va->status);
-    //stl_le_p(&cfg.max_dataqueues, va->max_queues);
-    stl_le_p(&cfg.services, va->conf.services);
-    stq_le_p(&cfg.max_size, va->conf.max_size);
+    memset(&cfg, 0, sizeof(cfg));
+
+    virtio_stw_p(vdev, &cfg.num_queues, va->config.num_queues);
+    virtio_stw_p(vdev, &cfg.max_req_descriptors,
+                 va->config.max_req_descriptors);
 
     memcpy(config, &cfg, va->config_size);
+}
+
+static void virtio_accel_set_config(VirtIODevice *vdev, const uint8_t *config)
+{
+    VirtIOAccel *va = VIRTIO_ACCEL(vdev);
+    struct virtio_accel_config cfg;
+
+    memcpy(&cfg, config, va->config_size);
 }
 
 static void virtio_accel_class_init(ObjectClass *klass, const void *data)
@@ -766,19 +779,15 @@ static void virtio_accel_class_init(ObjectClass *klass, const void *data)
     vdc->realize = virtio_accel_device_realize;
     vdc->unrealize = virtio_accel_device_unrealize;
     vdc->get_config = virtio_accel_get_config;
+    vdc->set_config = virtio_accel_set_config;
     vdc->get_features = virtio_accel_get_features;
-    vdc->reset = virtio_accel_reset;
 }
 
 static void virtio_accel_instance_init(Object *obj)
 {
-    VirtIOAccel *vaccel = VIRTIO_ACCEL(obj);
+    VirtIOAccel *va = VIRTIO_ACCEL(obj);
 
-    /*
-     * The default config_size is sizeof(struct virtio_crypto_config).
-     * Can be overriden with virtio_crypto_set_config_size.
-     */
-    vaccel->config_size = sizeof(struct virtio_accel_conf);
+    va->config_size = sizeof(struct virtio_accel_config);
 }
 
 static const TypeInfo virtio_accel_info = {
