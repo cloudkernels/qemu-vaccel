@@ -68,6 +68,7 @@ jobs:
           provenance: false
           build-args: |
             ARCHTAG=${{ fromJson(env.RUNNER_ARCH_MAP)[0][matrix.arch] }}
+            REPO=${{ github.repository }}
             BRANCH=${{ github.event.ref_name || github.ref_name }}
 
       - name: Set ${{ matrix.arch }} digest output

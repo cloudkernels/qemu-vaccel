@@ -43,13 +43,14 @@ RUN git clone https://github.com/nubificus/vaccel && \
     ldconfig && \
     cd .. && rm -rf vaccel
 
-ARG BRANCH=master+vaccel
 ARG ARCHTAG=x86_64
+ARG REPO=nubificus/qemu-vaccel
+ARG BRANCH=master+vaccel
 ARG DOCKER_DIR=.
 COPY ${DOCKER_DIR}/vq-size.patch /vq-size.patch
 # Build & install QEMU w/ vAccel backend
 RUN git clone -b ${BRANCH} --depth 1 \
-    https://github.com/cloudkernels/qemu-vaccel && \
+    https://github.com/${REPO} && \
     cd qemu-vaccel && \
     mv /vq-size.patch . && \
     git apply vq-size.patch && \

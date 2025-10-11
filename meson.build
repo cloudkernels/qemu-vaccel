@@ -4098,7 +4098,7 @@ common_ss.add(hwcore)
 
 if libvaccel.found()
   specific_ss.add_all(vaccel_virtio.get_variable('virtio_accel_ss'))
-  system_ss.add_all(vaccel_virtio.get_variable('acceldev_ss'))
+  system_ss.add_all(vaccel_virtio.get_variable('virtio_accel_backend_ss'))
 endif
 
 ###########

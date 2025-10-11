@@ -1,4 +1,4 @@
-acceldev_ss.add(files(
+virtio_accel_backend_ss.add(files(
   'backend.c',
   'genop.c',
   'genop.h',
@@ -10,7 +10,7 @@ acceldev_ss.add(files(
   'torch.h',
   ))
 
-acceldev_ss.add([
+virtio_accel_backend_ss.add([
   libvaccel_dep,
   libvaccel_virtio_common_dep,
   ])
