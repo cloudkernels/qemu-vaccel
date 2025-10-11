@@ -23,9 +23,10 @@ vaccel_virtio_dep = declare_dependency(
   include_directories : include_directories('include'))
 
 virtio_accel_ss = ss.source_set()
-acceldev_ss = ss.source_set()
+virtio_accel_backend_ss = ss.source_set()
 
-acceldev_ss.add(vaccel_virtio_dep)
+virtio_accel_ss.add(vaccel_virtio_dep)
+virtio_accel_backend_ss.add(vaccel_virtio_dep)
 
 subdir('backends')
 subdir('hw')

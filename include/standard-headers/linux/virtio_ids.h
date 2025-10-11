@@ -68,6 +68,7 @@
 #define VIRTIO_ID_AUDIO_POLICY		39 /* virtio audio policy */
 #define VIRTIO_ID_BT			40 /* virtio bluetooth */
 #define VIRTIO_ID_GPIO			41 /* virtio gpio */
+#define VIRTIO_ID_ACCEL			42 /* virtio accel */
 
 /*
  * Virtio Transitional IDs
@@ -80,5 +81,6 @@
 #define VIRTIO_TRANS_ID_SCSI		0x1004 /* transitional virtio SCSI */
 #define VIRTIO_TRANS_ID_RNG		0x1005 /* transitional virtio rng */
 #define VIRTIO_TRANS_ID_9P		0x1009 /* transitional virtio 9p console */
+#define VIRTIO_TRANS_ID_ACCEL		0x1010 /* transitional virtio accel */
 
 #endif /* _LINUX_VIRTIO_IDS_H */
