@@ -30,6 +30,42 @@ typedef struct VirtIOAccelBackendOp {
     uint32_t op_ret;
 } VirtIOAccelBackendOp;
 
+typedef struct VirtIOAccelBackendProfilerSample {
+    uint64_t start;
+    uint64_t time;
+} VirtIOAccelBackendProfilerSample;
+
+#define VIRTIO_ACCEL_BACKEND_TIMERS_NAME_MAX 64
+
+typedef struct VirtIOAccelBackendProfilerRegion {
+    char name[VIRTIO_ACCEL_BACKEND_TIMERS_NAME_MAX];
+    uint32_t max_samples;
+    uint32_t nr_samples;
+    VirtIOAccelBackendProfilerSample *samples;
+} VirtIOAccelBackendProfilerRegion;
+
+typedef struct VirtIOAccelBackendProfilerOp {
+    int64_t session_id;
+    uint32_t max_regions;
+    uint32_t nr_regions;
+    VirtIOAccelBackendProfilerRegion *regions;
+    uint32_t op_ret;
+} VirtIOAccelBackendProfilerOp;
+
+typedef struct VirtIOAccelBackendTimer {
+    void *opaque;
+    char name[VIRTIO_ACCEL_BACKEND_TIMERS_NAME_MAX];
+    QTAILQ_ENTRY(VirtIOAccelBackendTimer) next;
+} VirtIOAccelBackendTimer;
+
+typedef struct VirtIOAccelBackendSession {
+    void *opaque;
+    int64_t id;
+    QTAILQ_HEAD(, VirtIOAccelBackendTimer) timers;
+    uint32_t nr_timers;
+    QTAILQ_ENTRY(VirtIOAccelBackendSession) next;
+} VirtIOAccelBackendSession;
+
 typedef struct VirtIOAccelBackendClass {
     ObjectClass parent_class;
 
@@ -37,32 +73,30 @@ typedef struct VirtIOAccelBackendClass {
     void (*cleanup)(VirtIOAccelBackend *b, Error **errp);
 
     int64_t (*create_session)(VirtIOAccelBackend *b, VirtIOAccelBackendOp *op,
-                              Error **errp);
-    int (*destroy_session)(VirtIOAccelBackend *b, int64_t sess_id,
-                           Error **errp);
-    int (*do_op)(VirtIOAccelBackend *b, VirtIOAccelBackendOp *op, Error **errp);
-    int (*timer_start)(VirtIOAccelBackend *b, int64_t sess_id, const char *name,
+                              void **handle, Error **errp);
+    int (*destroy_session)(VirtIOAccelBackend *b,
+                           VirtIOAccelBackendSession *sess, Error **errp);
+    int (*do_op)(VirtIOAccelBackend *b, VirtIOAccelBackendSession *sess,
+                 VirtIOAccelBackendOp *op, Error **errp);
+
+    bool (*timers_enabled)(VirtIOAccelBackend *b);
+    int (*timer_create)(VirtIOAccelBackend *b, const char *name, void **handle,
+                        Error **errp);
+    void (*timer_destroy)(VirtIOAccelBackend *b,
+                          VirtIOAccelBackendTimer *timer);
+    int (*timer_start)(VirtIOAccelBackend *b, VirtIOAccelBackendTimer *timer,
                        Error **errp);
-    int (*timer_stop)(VirtIOAccelBackend *b, int64_t sess_id, const char *name,
+    int (*timer_stop)(VirtIOAccelBackend *b, VirtIOAccelBackendTimer *timer,
                       Error **errp);
-    int (*timers_get)(VirtIOAccelBackend *b, VirtIOAccelBackendOp *op,
-                      Error **errp);
+    int (*get_timers)(VirtIOAccelBackend *b, VirtIOAccelBackendSession *sess,
+                      VirtIOAccelBackendProfilerOp *op, Error **errp);
 } VirtIOAccelBackendClass;
 
 struct VirtIOAccelBackend {
     Object parent_obj;
+    QTAILQ_HEAD(, VirtIOAccelBackendSession) sessions;
     bool is_used;
 };
-
-/**
- * virtio_accel_backend_cleanup:
- * @b: the virtio-accel backend object
- * @errp: pointer to a NULL-initialized error object
- *
- * Clean the resouce associated with @backend that realizaed
- * by the specific backend's init() callback
- */
-void virtio_accel_backend_cleanup(VirtIOAccelBackend *b, Error **errp);
 
 /**
  * virtio_accel_backend_create_session:
@@ -150,7 +184,8 @@ int virtio_accel_backend_timer_stop(VirtIOAccelBackend *b, int64_t sess_id,
  *         or -VIRTIO_ACCEL_* on error
  */
 int virtio_accel_backend_get_timers(VirtIOAccelBackend *b,
-                                    VirtIOAccelBackendOp *op, Error **errp);
+                                    VirtIOAccelBackendProfilerOp *op,
+                                    Error **errp);
 
 /**
  * virtio_accel_backend_set_used:

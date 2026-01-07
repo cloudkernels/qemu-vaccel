@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include <stdint.h>
+#include <inttypes.h>
+
 #include "qemu/osdep.h"
 #include "qapi/error.h"
 #include "qemu/error-report.h"
@@ -24,94 +27,9 @@
 OBJECT_DECLARE_SIMPLE_TYPE(VirtIOAccelBackendVaccel,
                            VIRTIO_ACCEL_BACKEND_VACCEL)
 
-// TODO: Move to virtio-accel.c
-typedef struct VirtIOAccelBackendVaccelTimer {
-    struct vaccel_prof_region vaccel_tmr;
-    const char *name;
-    QTAILQ_ENTRY(VirtIOAccelBackendVaccelTimer) next;
-} VirtIOAccelBackendVaccelTimer;
-
-// TODO: Move to virtio-accel.c
-typedef struct VirtIOAccelBackendVaccelSession {
-    void *opaque;
-    int64_t id;
-    QTAILQ_HEAD(, VirtIOAccelBackendVaccelTimer) timers;
-    uint32_t nr_timers;
-    QTAILQ_ENTRY(VirtIOAccelBackendVaccelSession) next;
-} VirtIOAccelBackendVaccelSession;
-
-/* Max number of sessions */
-#define MAX_NUM_SESSIONS 1024
-
 struct VirtIOAccelBackendVaccel {
     VirtIOAccelBackend parent_obj;
-    QTAILQ_HEAD(, VirtIOAccelBackendVaccelSession) sessions;
 };
-
-static VirtIOAccelBackendVaccelTimer *
-timer_get(VirtIOAccelBackendVaccelSession *sess, const char *name)
-{
-    if (!vaccel_prof_enabled())
-        return NULL;
-
-    VirtIOAccelBackendVaccelTimer *timer, *tmp;
-    QTAILQ_FOREACH_SAFE(timer, &sess->timers, next, tmp)
-    {
-        if (strcmp(timer->name, name) == 0) {
-            return timer;
-        }
-    }
-    return NULL;
-}
-
-static void timers_del(VirtIOAccelBackendVaccelSession *sess)
-{
-    if (!vaccel_prof_enabled())
-        return;
-
-    VirtIOAccelBackendVaccelTimer *timer, *tmp;
-    QTAILQ_FOREACH_SAFE(timer, &sess->timers, next, tmp)
-    {
-        QTAILQ_REMOVE(&sess->timers, timer, next);
-        vaccel_prof_region_release(&timer->vaccel_tmr);
-        g_free(timer);
-    }
-}
-
-static VirtIOAccelBackendVaccelSession *
-session_get(VirtIOAccelBackendVaccel *vaccel, int64_t sess_id)
-{
-    VirtIOAccelBackendVaccelSession *sess, *tmp;
-    QTAILQ_FOREACH_SAFE(sess, &vaccel->sessions, next, tmp)
-    {
-        if (sess->id == sess_id)
-            return sess;
-    }
-    return NULL;
-}
-
-static VirtIOAccelBackendVaccelSession *
-session_create_and_add(VirtIOAccelBackendVaccel *vaccel, void *sess_data,
-                       int64_t sess_id)
-{
-    VirtIOAccelBackendVaccelSession *sess =
-        g_new0(VirtIOAccelBackendVaccelSession, 1);
-    sess->opaque = sess_data;
-    sess->id = sess_id;
-    QTAILQ_INIT(&sess->timers);
-    sess->nr_timers = 0;
-    QTAILQ_INSERT_TAIL(&vaccel->sessions, sess, next);
-
-    return sess;
-}
-
-static void session_del(VirtIOAccelBackendVaccel *vaccel,
-                        VirtIOAccelBackendVaccelSession *sess)
-{
-    QTAILQ_REMOVE(&vaccel->sessions, sess, next);
-    g_free(sess->opaque);
-    g_free(sess);
-}
 
 static int parse_vaccel_args(VirtIOAccelBackendArg *out_args,
                              VirtIOAccelBackendArg *in_args, size_t nr_out_args,
@@ -215,15 +133,15 @@ static void cleanup_vaccel_args(struct vaccel_arg_array *read_args,
 
 static int64_t virtio_accel_vaccel_create_session(VirtIOAccelBackend *b,
                                                   VirtIOAccelBackendOp *op,
-                                                  Error **errp)
+                                                  void **handle, Error **errp)
 {
-    VirtIOAccelBackendVaccel *vaccel = VIRTIO_ACCEL_BACKEND_VACCEL(b);
     struct vaccel_session *sess_data = NULL;
-    VirtIOAccelBackendVaccelSession *sess;
     struct vaccel_arg_array read_args;
     struct vaccel_arg_array write_args;
     uint32_t flags;
     int ret = VIRTIO_ACCEL_OK;
+
+    (void)b;
 
     if (op->nr_out < 1) {
         error_setg(errp,
@@ -252,43 +170,36 @@ static int64_t virtio_accel_vaccel_create_session(VirtIOAccelBackend *b,
         goto cleanup;
     }
 
-    sess = session_create_and_add(vaccel, (void *)sess_data, sess_data->id);
+    *handle = sess_data;
 
 cleanup:
     cleanup_vaccel_args(&read_args, &write_args);
-    return (ret < 0) ? ret : sess->id;
+    return (ret < 0) ? ret : sess_data->id;
 }
 
 static int virtio_accel_vaccel_destroy_session(VirtIOAccelBackend *b,
-                                               int64_t sess_id, Error **errp)
+                                               VirtIOAccelBackendSession *sess,
+                                               Error **errp)
 {
-    VirtIOAccelBackendVaccel *vaccel = VIRTIO_ACCEL_BACKEND_VACCEL(b);
-    VirtIOAccelBackendVaccelSession *sess;
     int ret;
 
-    sess = session_get(vaccel, sess_id);
-    if (!sess) {
-        error_setg(errp, "Cannot find a valid session with id: %" PRId64 "",
-                   sess_id);
-        return -VIRTIO_ACCEL_INVSESS;
-    }
+    (void)b;
 
     ret = vaccel_session_delete((struct vaccel_session *)sess->opaque);
     if (ret)
         return -VIRTIO_ACCEL_ERR;
 
-    timers_del(sess);
-    session_del(vaccel, sess);
-
     return VIRTIO_ACCEL_OK;
 }
 
-static int do_operation(struct vaccel_session *sess, VirtIOAccelBackendOp *op,
-                        VirtIOAccelBackend *b, Error **errp)
+static int do_operation(VirtIOAccelBackend *b, struct vaccel_session *sess,
+                        VirtIOAccelBackendOp *op, Error **errp)
 {
     struct vaccel_arg_array read_args;
     struct vaccel_arg_array write_args;
     int ret = VIRTIO_ACCEL_OK;
+
+    (void)b;
 
     if (op->op_code >= VACCEL_VIRTIO_MAX)
         return -VIRTIO_ACCEL_ERR;
@@ -331,18 +242,12 @@ static int do_operation(struct vaccel_session *sess, VirtIOAccelBackendOp *op,
 }
 
 static int virtio_accel_vaccel_operation(VirtIOAccelBackend *b,
+                                         VirtIOAccelBackendSession *sess,
                                          VirtIOAccelBackendOp *op, Error **errp)
 {
-    VirtIOAccelBackendVaccel *vaccel = VIRTIO_ACCEL_BACKEND_VACCEL(b);
-    VirtIOAccelBackendVaccelSession *sess;
     int ret;
 
-    sess = session_get(vaccel, op->session_id);
-    if (!sess) {
-        error_setg(errp, "Cannot find a valid session with id: %" PRId64 "",
-                   op->session_id);
-        return -VIRTIO_ACCEL_INVSESS;
-    }
+    (void)b;
 
     if (op->nr_out < 1) {
         error_setg(errp, "vAccel op requires at least 1 out argument (got %u)",
@@ -350,112 +255,117 @@ static int virtio_accel_vaccel_operation(VirtIOAccelBackend *b,
         return -VIRTIO_ACCEL_ERR;
     }
 
-    ret = do_operation(sess->opaque, op, b, errp);
+    ret = do_operation(b, (struct vaccel_session *)sess->opaque, op, errp);
     if (ret)
         return ret;
 
     return VIRTIO_ACCEL_OK;
 }
 
+static bool virtio_accel_vaccel_timers_enabled(VirtIOAccelBackend *b)
+{
+    (void)b;
+    return vaccel_prof_enabled();
+}
+
+static int virtio_accel_vaccel_timer_create(VirtIOAccelBackend *b,
+                                            const char *name, void **handle,
+                                            Error **errp)
+{
+    struct vaccel_prof_region *region = g_new0(struct vaccel_prof_region, 1);
+
+    (void)b;
+
+    if (vaccel_prof_region_init(region, name)) {
+        g_free(region);
+        return -VIRTIO_ACCEL_ERR;
+    }
+
+    *handle = region;
+    return VIRTIO_ACCEL_OK;
+}
+
+static void virtio_accel_vaccel_timer_destroy(VirtIOAccelBackend *b,
+                                              VirtIOAccelBackendTimer *timer)
+{
+    struct vaccel_prof_region *region =
+        (struct vaccel_prof_region *)timer->opaque;
+
+    (void)b;
+
+    vaccel_prof_region_release(region);
+    g_free(region);
+}
+
 static int virtio_accel_vaccel_timer_start(VirtIOAccelBackend *b,
-                                           int64_t sess_id, const char *name,
+                                           VirtIOAccelBackendTimer *timer,
                                            Error **errp)
 {
-    if (!vaccel_prof_enabled())
-        return VIRTIO_ACCEL_OK;
+    (void)b;
+    (void)errp;
 
-    VirtIOAccelBackendVaccel *vaccel = VIRTIO_ACCEL_BACKEND_VACCEL(b);
-    VirtIOAccelBackendVaccelSession *sess;
-    int ret;
-
-    sess = session_get(vaccel, sess_id);
-    if (!sess)
-        return -VIRTIO_ACCEL_INVSESS;
-
-    VirtIOAccelBackendVaccelTimer *timer = timer_get(sess, name);
-    if (!timer) {
-        timer = g_new0(VirtIOAccelBackendVaccelTimer, 1);
-        ret = vaccel_prof_region_init(&timer->vaccel_tmr, name);
-        if (ret != VACCEL_OK) {
-            g_free(timer);
-            return -VIRTIO_ACCEL_ERR;
-        }
-        timer->name = timer->vaccel_tmr.name;
-
-        QTAILQ_INSERT_TAIL(&sess->timers, timer, next);
-        sess->nr_timers++;
-    }
-    vaccel_prof_region_start(&timer->vaccel_tmr);
+    if (vaccel_prof_region_start((struct vaccel_prof_region *)timer->opaque))
+        return -VIRTIO_ACCEL_ERR;
 
     return VIRTIO_ACCEL_OK;
 }
 
 static int virtio_accel_vaccel_timer_stop(VirtIOAccelBackend *b,
-                                          int64_t sess_id, const char *name,
+                                          VirtIOAccelBackendTimer *timer,
                                           Error **errp)
 {
-    if (!vaccel_prof_enabled())
-        return VIRTIO_ACCEL_OK;
+    (void)b;
+    (void)errp;
 
-    VirtIOAccelBackendVaccel *vaccel = VIRTIO_ACCEL_BACKEND_VACCEL(b);
-    VirtIOAccelBackendVaccelSession *sess;
-
-    sess = session_get(vaccel, sess_id);
-    if (!sess)
-        return -VIRTIO_ACCEL_INVSESS;
-
-    VirtIOAccelBackendVaccelTimer *timer = timer_get(sess, name);
-    if (!timer)
-        return VIRTIO_ACCEL_OK;
-
-    vaccel_prof_region_stop(&timer->vaccel_tmr);
+    if (vaccel_prof_region_stop((struct vaccel_prof_region *)timer->opaque))
+        return -VIRTIO_ACCEL_ERR;
 
     return VIRTIO_ACCEL_OK;
 }
 
-static int
-get_profiler_region_samples(struct virtio_accel_profiler_sample *reg_samples,
-                            uint32_t nr_reg_samples,
-                            VirtIOAccelBackendVaccelTimer *timer)
+static uint32_t get_profiler_samples(VirtIOAccelBackendTimer *timer,
+                                     VirtIOAccelBackendProfilerSample *samples,
+                                     uint32_t nr_samples)
 {
-    int i = 0;
+    struct vaccel_prof_region *region =
+        (struct vaccel_prof_region *)timer->opaque;
+    size_t i = 0;
 
-    for (i = 0; i < timer->vaccel_tmr.nr_entries; i++) {
-        if (i == nr_reg_samples) {
+    for (i = 0; i < region->nr_entries; i++) {
+        if (i == (size_t)nr_samples) {
             warn_report(
-                "Not all virtio-accel samples for %s can be returned (allocated: %d vs total: %ld)",
-                timer->name, nr_reg_samples, timer->vaccel_tmr.nr_entries);
+                "Not all samples for %s can be returned (allocated: %" PRIu32
+                " vs total: %zu)",
+                timer->name, nr_samples, region->nr_entries);
             break;
         }
-        reg_samples[i].start = timer->vaccel_tmr.samples[i].start;
-        reg_samples[i].time = timer->vaccel_tmr.samples[i].time;
+        samples[i].start = region->samples[i].start;
+        samples[i].time = region->samples[i].time;
     }
 
-    return i;
+    return (uint32_t)i;
 }
 
 #define TIMERS_NAME_PREFIX "[qemu-vaccel]"
-static int get_profiler_regions(struct virtio_accel_profiler_region *regions,
-                                uint32_t nr_regions,
-                                VirtIOAccelBackendVaccelSession *sess)
+static uint32_t get_profiler_regions(VirtIOAccelBackendSession *sess,
+                                     VirtIOAccelBackendProfilerRegion *regions,
+                                     uint32_t nr_regions)
 {
-    if (nr_regions < 1)
-        return -VIRTIO_ACCEL_ERR;
-
-    int i = 0;
-    VirtIOAccelBackendVaccelTimer *timer, *tmp;
+    uint32_t i = 0;
+    VirtIOAccelBackendTimer *timer, *tmp;
     QTAILQ_FOREACH_SAFE(timer, &sess->timers, next, tmp)
     {
         if (i == nr_regions) {
-            warn_report(
-                "Not all virtio-accel timers can be returned (allocated: %d vs total: %d)",
-                nr_regions, sess->nr_timers);
+            warn_report("Not all timers can be returned (allocated: %" PRIu32
+                        " vs total: %" PRIu32 ")",
+                        nr_regions, sess->nr_timers);
             break;
         }
-        g_snprintf(regions[i].name, VIRTIO_ACCEL_TIMERS_NAME_MAX, "%s %s",
-                   TIMERS_NAME_PREFIX, timer->name);
-        regions[i].nr_entries = get_profiler_region_samples(
-            regions[i].samples, regions[i].size, timer);
+
+        g_snprintf(regions[i].name, VIRTIO_ACCEL_BACKEND_TIMERS_NAME_MAX,
+                   "%s %s", TIMERS_NAME_PREFIX, timer->name);
+        regions[i].nr_samples = get_profiler_samples(timer, regions[i].samples,
+                                                     regions[i].max_samples);
         i++;
     }
 
@@ -463,100 +373,26 @@ static int get_profiler_regions(struct virtio_accel_profiler_region *regions,
 }
 
 static int virtio_accel_vaccel_get_timers(VirtIOAccelBackend *b,
-                                          VirtIOAccelBackendOp *op,
+                                          VirtIOAccelBackendSession *sess,
+                                          VirtIOAccelBackendProfilerOp *op,
                                           Error **errp)
 {
-    if (!vaccel_prof_enabled())
-        return VIRTIO_ACCEL_OK;
+    (void)b;
 
-    VirtIOAccelBackendVaccel *vaccel = VIRTIO_ACCEL_BACKEND_VACCEL(b);
-    VirtIOAccelBackendVaccelSession *sess;
-    int ret;
-
-    sess = session_get(vaccel, op->session_id);
-    if (!sess) {
-        error_setg(errp, "Cannot find a valid session with id: %" PRId64 "",
-                   op->session_id);
-        return -VIRTIO_ACCEL_INVSESS;
-    }
-
-    if (op->nr_in < 1) {
-        error_setg(errp,
-                   "vaccel get_timers requires at least 1 in argument (got %u)",
-                   op->nr_out);
-        return -VIRTIO_ACCEL_ERR;
-    }
-
-    uint32_t *nt = (uint32_t *)op->in[0].buf;
-    uint32_t *qnt = (uint32_t *)op->in[1].buf;
-    if (*qnt == 0) {
-        *qnt = sess->nr_timers;
-        ret = VIRTIO_ACCEL_OK;
-    } else {
-        uint64_t nr_timers = *nt + *qnt;
-
-        if (op->nr_in < 3 + nr_timers) {
-            error_setg(errp,
-                       "vaccel get_timers: not enough in arguments (got %u)",
-                       op->nr_in);
-            return -VIRTIO_ACCEL_ERR;
-        }
-
-        struct virtio_accel_profiler_region *regions =
-            (struct virtio_accel_profiler_region *)op->in[2].buf;
-        if (op->in[2].len < nr_timers * sizeof(*regions)) {
-            error_setg(errp,
-                       "vaccel get_timers: wrong preallocated size (got %d)",
-                       op->in[2].len);
-            return -VIRTIO_ACCEL_ERR;
-        }
-
-        struct virtio_accel_profiler_sample **tmp_samples =
-            g_new0(struct virtio_accel_profiler_sample *, *qnt);
-        if (!tmp_samples) {
-            return -VIRTIO_ACCEL_ERR;
-        }
-
-        for (int i = *nt; i < nr_timers; i++) {
-            tmp_samples[i - *nt] = regions[i].samples;
-            regions[i].samples =
-                (struct virtio_accel_profiler_sample *)op->in[3 + i].buf;
-        }
-
-        ret = get_profiler_regions(&regions[*nt], *qnt, sess);
-        if (ret < 0) {
-            ret = -VIRTIO_ACCEL_ERR;
-            goto free;
-        } else {
-            ret = VIRTIO_ACCEL_OK;
-        }
-
-        for (int i = *nt; i < nr_timers; i++) {
-            regions[i].samples = tmp_samples[i - *nt];
-        }
-
-free:
-        g_free(tmp_samples);
-    }
-
-    return ret;
+    op->nr_regions = get_profiler_regions(sess, op->regions, op->max_regions);
+    return VIRTIO_ACCEL_OK;
 }
 
 static void virtio_accel_vaccel_init(VirtIOAccelBackend *b, Error **errp)
 {
-    VirtIOAccelBackendVaccel *vaccel = VIRTIO_ACCEL_BACKEND_VACCEL(b);
-    QTAILQ_INIT(&vaccel->sessions);
+    (void)b;
+    (void)errp;
 }
 
 static void virtio_accel_vaccel_cleanup(VirtIOAccelBackend *b, Error **errp)
 {
-    VirtIOAccelBackendVaccel *vaccel = VIRTIO_ACCEL_BACKEND_VACCEL(b);
-    VirtIOAccelBackendVaccelSession *sess, *tmp;
-
-    QTAILQ_FOREACH_SAFE(sess, &vaccel->sessions, next, tmp)
-    {
-        virtio_accel_vaccel_destroy_session(b, sess->id, errp);
-    }
+    (void)b;
+    (void)errp;
 }
 
 static void virtio_accel_vaccel_class_init(ObjectClass *oc, const void *data)
@@ -568,9 +404,12 @@ static void virtio_accel_vaccel_class_init(ObjectClass *oc, const void *data)
     bc->create_session = virtio_accel_vaccel_create_session;
     bc->destroy_session = virtio_accel_vaccel_destroy_session;
     bc->do_op = virtio_accel_vaccel_operation;
+    bc->timers_enabled = virtio_accel_vaccel_timers_enabled;
+    bc->timer_create = virtio_accel_vaccel_timer_create;
+    bc->timer_destroy = virtio_accel_vaccel_timer_destroy;
     bc->timer_start = virtio_accel_vaccel_timer_start;
     bc->timer_stop = virtio_accel_vaccel_timer_stop;
-    bc->timers_get = virtio_accel_vaccel_get_timers;
+    bc->get_timers = virtio_accel_vaccel_get_timers;
 }
 
 static const TypeInfo virtio_accel_vaccel_info = {
