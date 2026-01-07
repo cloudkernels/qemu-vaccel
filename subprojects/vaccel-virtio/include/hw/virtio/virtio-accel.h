@@ -48,7 +48,10 @@ typedef struct VirtIOAccelRequest {
     QEMUTimer *chunk_timer;
 
     uint32_t cmd;
-    VirtIOAccelBackendOp op;
+    union {
+        VirtIOAccelBackendOp op;
+        VirtIOAccelBackendProfilerOp profiler_op;
+    };
 
     QTAILQ_ENTRY(VirtIOAccelRequest) next;
 } VirtIOAccelRequest;
