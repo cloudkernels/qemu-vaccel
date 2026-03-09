@@ -1,0 +1,303 @@
+name: Build QEMU+vAccel docker image
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        type: string
+        default: '["base", "dind", "2204"]'
+      runner-archs:
+        type: string
+        default: '["amd64", "arm64"]'
+      runner-arch-map:
+        type: string
+        default: '[{"amd64":"x86_64", "arm64":"aarch64", "arm":"armv7l"}]'
+      registry:
+        type: string
+        default: 'harbor.nbfc.io'
+        required: false
+      release:
+        type: boolean
+        default: false
+    secrets:
+      VACCEL_BOT_PRIVATE_KEY:
+        required: false
+      HARBOR_USER:
+        required: false
+      HARBOR_SECRET:
+        required: false
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  # NOTE: We assume that a project named after the repo owner exists in the
+  # registry. The image will be uploaded as <repo_name> under the <repo_owner>
+  # project.
+  REGISTRY_IMAGE: ${{ format('{0}/{1}', inputs.registry, github.repository) }}
+
+jobs:
+  build:
+    name: Build Docker Image
+    runs-on: >-
+      ${{ format('{0}-{1}', join(fromJSON(inputs.runner), '-'), matrix.arch) }}
+    strategy:
+      matrix:
+        arch: ["${{ fromJSON(inputs.runner-archs) }}"]
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      digest-amd64: ${{ steps.set-outputs.outputs.digest-amd64 }}
+      digest-arm64: ${{ steps.set-outputs.outputs.digest-arm64 }}
+
+    steps:
+      - name: Log in to registry ${{ inputs.registry }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.HARBOR_USER }}
+          password: ${{ secrets.HARBOR_SECRET }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Extract Docker metadata
+        id: extract-metadata
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=sha,prefix=${{ matrix.arch }}-
+            type=ref,event=branch,prefix=${{ matrix.arch }}-
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Get build component versions
+        id: get-versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LABELS: >-
+            ${{ github.event_name == 'pull_request' &&
+              toJson(github.event.pull_request.labels.*.name) || '' }}
+        run: |
+          ubuntu_version=$(. /etc/os-release && echo "$VERSION_ID")
+
+          if [[ -n "$LABELS" ]]; then
+            version=$(jq -r '
+              .[]
+              | select(test("^release-v"))
+              | ltrimstr("release-v")
+            ' <<< "$LABELS")
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            pr_url=
+            for i in 1 2; do
+              pr_url=$(gh api \
+                "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+                --jq '.[0].url // empty')
+              if [[ -n "$pr_url" ]]; then
+                break
+              fi
+              sleep $((i * 5))
+            done
+
+            version=
+            if [[ -n "$pr_url" ]]; then
+              version=$(gh api "$pr_url" |
+                jq -r '
+                  .labels[].name
+                  | select(startswith("release-v"))
+                  | sub("^release-v"; "")
+                ')
+            fi
+          fi
+
+          vaccel_version='latest'
+          if [[ "$version" == *+*.* ]]; then
+              vaccel_str="${version#*+}"
+              vaccel_version="${vaccel_str#*.}"
+          fi
+
+          {
+            echo "ubuntu-version=${ubuntu_version}"
+            echo "vaccel-version=${vaccel_version}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Ubuntu version: ${ubuntu_version}"
+          echo "vAccel version: ${vaccel_version}"
+        shell: bash
+
+      - name: Parse repository names
+        id: parse-repos
+        run: |
+          subproject_repo_names=$(find subprojects/vaccel-virtio \
+            -name '*.wrap' \
+            -exec \
+              grep -h "^\s*url\s*=.*github\.com/${GITHUB_REPOSITORY_OWNER}.*" \
+              {} \; |
+            cut -d= -f2 | tr -d " " | xargs -n1 basename 2>/dev/null || true)
+
+          {
+            echo "repo-name=$(basename "$GITHUB_REPOSITORY")"
+            echo 'subproject-repo-names<<EOF'
+            echo "$subproject_repo_names"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Generate vaccel-bot token
+        id: generate-token
+        if: vars.VACCEL_BOT_CLIENT_ID
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.VACCEL_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.VACCEL_BOT_PRIVATE_KEY }}
+          repositories: |
+            ${{ steps.parse-repos.outputs.repo-name }}
+            ${{ steps.parse-repos.outputs.subproject-repo-names }}
+          permission-contents: read
+
+      - name: "Build and push ${{ matrix.arch }} image"
+        id: build-and-push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: subprojects/vaccel-virtio/docker/Dockerfile
+          tags: ${{ steps.extract-metadata.outputs.tags }}
+          labels: ${{ steps.extract-metadata.outputs.labels }}
+          platforms: ${{ format('linux/{0}', matrix.arch) }}
+          push: ${{ inputs.release }}
+          provenance: false
+          build-args: |
+            UBUNTU_VERSION=${{ steps.get-versions.outputs.ubuntu-version }}
+            ARCH_TAG=${{ fromJson(inputs.runner-arch-map)[0][matrix.arch] }}
+            VACCEL_VERSION=${{ steps.get-versions.outputs.vaccel-version }}
+          secrets: |
+            GIT_AUTH_TOKEN=${{ steps.generate-token.outputs.token || github.token }}
+
+      - name: Set ${{ matrix.arch }} digest output
+        id: set-outputs
+        env:
+          MATRIX_ARCH: ${{ matrix.arch }}
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
+        run: |
+          # Workaround for https://github.com/actions/runner/issues/2499
+          echo "digest-${MATRIX_ARCH}=${DIGEST}" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+  create-manifest:
+    needs: build
+    name: Create Merged Docker Image Manifest
+    if: inputs.release == true
+    runs-on: 'base-dind-2204-amd64'
+    outputs:
+      digest-merged: ${{ steps.inspect.outputs.digest-merged }}
+
+    steps:
+      - name: Log in to registry ${{ inputs.REGISTRY }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.HARBOR_USER }}
+          password: ${{ secrets.HARBOR_SECRET }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Extract Docker metadata
+        id: extract-metadata
+        uses: docker/metadata-action@v6
+        env:
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          IS_DEFAULT_BRANCH: >-
+            ${{ github.ref_name == github.event.repository.default_branch }}
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=match,pattern=v(.*),group=1
+            type=semver,pattern={{version}}
+            type=match,prefix=latest,pattern=v\d.\d.\d(.*),group=1
+            type=raw,value=latest,enable=${{ env.IS_TAG }}
+            type=raw,value=latest-dev,enable=${{ env.IS_DEFAULT_BRANCH }}
+
+      - name: Create and push manifest
+        env:
+          DIGESTS: >-
+            ${{ needs.build.outputs.digest-amd64 }}
+            ${{ needs.build.outputs.digest-arm64 }}
+        run: |
+          mapfile -t tags < <(jq -r '.tags[] | "-t", .' \
+            <<< "$DOCKER_METADATA_OUTPUT_JSON")
+
+          source_images=()
+          for digest in $DIGESTS; do
+            source_images+=("${REGISTRY_IMAGE}@${digest}")
+          done
+
+          docker buildx imagetools create "${tags[@]}" "${source_images[@]}"
+        shell: bash
+
+      - name: Inspect merged image
+        id: inspect
+        env:
+          IMAGE_VERSION: ${{ steps.extract-metadata.outputs.version }}
+        run: |
+          image="${REGISTRY_IMAGE}:${IMAGE_VERSION}"
+          docker buildx imagetools inspect "$image"
+          digest=$(docker buildx imagetools inspect "$image" \
+            --format '{{json .Manifest}}' | jq -r '.digest')
+          if [[ -z "$digest" ]]; then
+            echo "Could not get merged image digest"
+            exit 1
+          fi
+          echo "digest-merged=${digest}" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+  sign:
+    needs: [build, create-manifest]
+    name: Sign Docker Images
+    if: inputs.release == true
+    runs-on: 'base-dind-2204-amd64'
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.1
+
+      - name: Verify Cosign installation
+        run: cosign version
+
+      - name: Log in to registry ${{ inputs.registry }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.HARBOR_USER }}
+          password: ${{ secrets.HARBOR_SECRET }}
+
+      - name: Sign published Docker images
+        env:
+          DIGESTS: >-
+            ${{ needs.create-manifest.outputs.digest-merged }}
+            ${{ needs.build.outputs.digest-amd64 }}
+            ${{ needs.build.outputs.digest-arm64 }}
+        run: |
+          # Use '--new-bundle-format=false --use-signing-config=false' to
+          # work around https://github.com/goharbor/harbor/issues/22401
+          for digest in $DIGESTS; do
+            cosign sign --yes "${REGISTRY_IMAGE}@${digest}" \
+              -a "repo=${GITHUB_REPOSITORY}" \
+              -a "workflow=${GITHUB_WORKFLOW}" \
+              -a "ref=${GITHUB_SHA}" \
+              -a "author=Nubificus LTD" \
+              --new-bundle-format=false \
+              --use-signing-config=false
+          done
+        shell: bash

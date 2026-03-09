@@ -41,11 +41,15 @@ error() {
 }
 
 cleanup_log_file() {
-    [[ -n "$1" ]] && [[ -z "$(cat "$1")" ]] && rm -f "$1" || true
+    if [[ -n "$1" ]] && [[ -z "$(cat "$1")" ]]; then
+        rm -f "$1"
+    fi
 }
 
 print_log_file() {
-    [[ -f "$1" ]] && echo "${1}:" && cat "$1" || true
+    if [[ -f "$1" ]]; then
+        echo "${1}:" && cat "$1"
+    fi
 }
 
 parse_args() {
@@ -180,8 +184,12 @@ parse_args() {
             ;;
         esac
     done
+
     cmdline+="mem=${ram}M"
-    [[ -z "${no_kvm}" ]] && extra_args+='-enable-kvm ' || true
+
+    if [[ -z "${no_kvm}" ]]; then
+        extra_args+='-enable-kvm '
+    fi
 }
 
 setup_qemu_network() {
@@ -215,7 +223,9 @@ cleanup_qemu_socket() {
 }
 
 print_qemu_output() {
-    [[ -n "$1" ]] && print_log_file "${serial_log}" || true
+    if [[ -n "$1" ]]; then
+        print_log_file "${serial_log}"
+    fi
 }
 
 check_rootfs_img() {
@@ -229,6 +239,7 @@ check_rootfs_img() {
 }
 
 run_qemu() {
+    # shellcheck disable=SC2140,SC2086
     TERM=linux qemu-system-"$(uname -m)" \
         -cpu "${cpu}" -m "${ram}" -smp "${smp}" -M "${machine}" -nographic \
         -kernel "${kernel}" -append "${cmdline}" \
