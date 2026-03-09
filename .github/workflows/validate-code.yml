@@ -1,0 +1,183 @@
+name: Validate Source Code
+
+on:
+  workflow_call:
+    inputs:
+      actions-repo:
+        type: string
+        default: 'nubificus/vaccel'
+      actions-ref:
+        type: string
+        default: 'main'
+      runner:
+        type: string
+        default: '["base", "dind", "2204"]'
+      runner-archs:
+        type: string
+        default: '["amd64"]'
+      runner-arch-map:
+        type: string
+        default: '[{"amd64":"x86_64", "arm64":"aarch64", "arm":"armv7l"}]'
+    secrets:
+      VACCEL_BOT_PRIVATE_KEY:
+        required: false
+
+permissions: read-all
+
+env:
+  ACTIONS_REF: >-
+    ${{ github.repository != inputs.actions-repo && inputs.actions-ref || '' }}
+
+jobs:
+  linter-cpp-linter:
+    name: Lint C/C++ (cpp-linter)
+    runs-on: >-
+      ${{ format('{0}-{1}', join(fromJSON(inputs.runner), '-'), matrix.arch) }}
+    strategy:
+      matrix:
+        arch: ["${{ fromJSON(inputs.runner-archs) }}"]
+        build-type: [release]
+      fail-fast: false
+    env:
+      ARCH: ${{ fromJson(inputs.runner-arch-map)[0][matrix.arch] }}
+      DOWNLOAD_PATH: >-
+        ${{ format('{0}/artifacts/downloads/{1}/{2}', github.workspace,
+          fromJson(inputs.runner-arch-map)[0][matrix.arch], matrix.build-type) }}
+    steps:
+      - name: Generate initialization vaccel-bot token
+        id: generate-init-token
+        if: vars.VACCEL_BOT_CLIENT_ID
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.VACCEL_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.VACCEL_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: read
+
+      - name: Checkout .github directory
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github
+          repository: ${{ inputs.actions-repo }}
+          ref: ${{ env.ACTIONS_REF }}
+          token: ${{ steps.generate-init-token.outputs.token || github.token }}
+
+      - name: Initialize workspace
+        id: initialize-workspace
+        uses: ./.github/actions/initialize-workspace
+        with:
+          fetch-depth: 0
+          remote-actions-repo: ${{ inputs.actions-repo }}
+          submodules: false
+          token: ${{ steps.generate-init-token.outputs.token || github.token }}
+
+      - name: Generate linter vaccel-bot token
+        id: generate-linter-token
+        if: vars.VACCEL_BOT_CLIENT_ID
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.VACCEL_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.VACCEL_BOT_PRIVATE_KEY }}
+          permission-contents: read
+          permission-pull-requests: write
+
+      - name: Run cpp-linter
+        uses: cpp-linter/cpp-linter-action@v2
+        id: cpp_linter
+        env:
+          GITHUB_TOKEN: >-
+            ${{ steps.generate-linter-token.outputs.token || github.token }}
+          UV_DISABLE_UPDATE: 1
+        with:
+          style: 'file'  # Use .clang-format config file
+          tidy-checks: '-*' # Disable clang-tidy
+          ignore: 'build*'
+          thread-comments: ${{ github.event_name == 'pull_request' && 'true' }}
+          format-review: ${{ github.event_name == 'pull_request' && 'true' }}
+          version: 18
+
+      - name: Clean-up
+        if: always()
+        run: sudo rm -rf build*
+        shell: bash
+
+      - name: Fail on error
+        if: steps.cpp_linter.outputs.clang-format-checks-failed > 0
+        run: exit 1
+
+  linter-super-linter:
+    name: Lint Python/Shell/Dockerfiles/GHActions/Markdown/YAML/JS
+    runs-on: >-
+      ${{ format('{0}-{1}', join(fromJSON(inputs.runner), '-'), matrix.arch) }}
+    strategy:
+      matrix:
+        arch: ["${{ fromJSON(inputs.runner-archs) }}"]
+      fail-fast: false
+    steps:
+      - name: Parse repository names
+        id: parse-repos
+        env:
+          ACTIONS_REPO: ${{ inputs.actions-repo }}
+        run: |
+          {
+            echo "repo-name=$(basename "$GITHUB_REPOSITORY")"
+            echo "actions-repo-name=$(basename "$ACTIONS_REPO")"
+          } >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Generate initialization vaccel-bot token
+        id: generate-init-token
+        if: vars.VACCEL_BOT_CLIENT_ID
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.VACCEL_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.VACCEL_BOT_PRIVATE_KEY }}
+          repositories: |
+            ${{ steps.parse-repos.outputs.repo-name }}
+            ${{ steps.parse-repos.outputs.actions-repo-name }}
+          permission-contents: read
+
+      - name: Checkout .github directory
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github
+          repository: ${{ inputs.actions-repo }}
+          ref: ${{ env.ACTIONS_REF }}
+          token: ${{ steps.generate-init-token.outputs.token || github.token }}
+
+      - name: Initialize workspace
+        uses: ./.github/actions/initialize-workspace
+        with:
+          fetch-depth: 0
+          remote-actions-repo: ${{ inputs.actions-repo }}
+          submodules: false
+          token: ${{ steps.generate-init-token.outputs.token || github.token }}
+
+      - name: Generate linter vaccel-bot token
+        id: generate-linter-token
+        if: vars.VACCEL_BOT_CLIENT_ID
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.VACCEL_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.VACCEL_BOT_PRIVATE_KEY }}
+          permission-contents: read
+          permission-packages: read
+          permission-statuses: write
+
+      - name: Run super-linter
+        uses: super-linter/super-linter@v8
+        env:
+          GITHUB_TOKEN: >-
+            ${{ steps.generate-linter-token.outputs.token || github.token }}
+          ENABLE_GITHUB_PULL_REQUEST_SUMMARY_COMMENT: false
+          VALIDATE_ALL_CODEBASE: false
+          FILTER_REGEX_INCLUDE: '^.github/|^subprojects/vaccel-virtio/'
+          STRIP_DEFAULT_WORKSPACE_FOR_REGEX: true
+          VALIDATE_PYTHON_RUFF: true
+          VALIDATE_BASH: true
+          VALIDATE_SHELL_SHFMT: true
+          VALIDATE_DOCKERFILE_HADOLINT: true
+          VALIDATE_GITHUB_ACTIONS: true
+          VALIDATE_MARKDOWN: true
+          VALIDATE_YAML: true
+          VALIDATE_JAVASCRIPT_ES: true

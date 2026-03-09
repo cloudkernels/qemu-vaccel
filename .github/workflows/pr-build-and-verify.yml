@@ -1,0 +1,54 @@
+name: Build and Verify
+
+on:
+  pull_request:
+    branches: [ '*\+vaccel' ]
+    types: [synchronize, labeled]
+
+  workflow_dispatch:
+
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  check-pr-status:
+    name: Check PR status
+    uses: nubificus/vaccel/.github/workflows/check-pr-status.yml@main
+    secrets: inherit
+
+  build-docker-image:
+    needs: check-pr-status
+    name: Build QEMU+vAccel docker image
+    if: needs.check-pr-status.outputs.expects-checks == 'true'
+    permissions:
+      contents: read
+      packages: read
+      pull-requests: read
+      id-token: write
+    uses: ./.github/workflows/build-docker-image.yml
+    secrets: inherit
+
+  validate-code:
+    needs: check-pr-status
+    name: Validate Code
+    if: needs.check-pr-status.outputs.expects-checks == 'true'
+    uses: ./.github/workflows/validate-code.yml
+    secrets: inherit
+
+  # Dummy job for setting required checks
+  jobs-completed:
+    needs: [check-pr-status, build-docker-image, validate-code]
+    name: Jobs Completed
+    if: >-
+      always() &&
+      (needs.check-pr-status.outputs.is-approved == 'true' ||
+        (needs.check-pr-status.outputs.expects-checks == 'true' &&
+          !contains(needs.*.result, 'failure') &&
+          !contains(needs.*.result, 'cancelled')))
+    runs-on: base-2204-amd64
+    steps:
+      - run: exit 0
