@@ -198,6 +198,7 @@ static int do_operation(VirtIOAccelBackend *b, struct vaccel_session *sess,
     struct vaccel_arg_array read_args;
     struct vaccel_arg_array write_args;
     int ret = VIRTIO_ACCEL_OK;
+    int ret_upd = VIRTIO_ACCEL_OK;
 
     (void)b;
 
@@ -231,14 +232,14 @@ static int do_operation(VirtIOAccelBackend *b, struct vaccel_session *sess,
 
     virtio_accel_backend_timer_start(b, sess->id, "do op > update args", errp);
 
-    ret = -update_backend_args(op->in, op->nr_in, &write_args, errp);
-    if (ret && errp && *errp == NULL)
+    ret_upd = -update_backend_args(op->in, op->nr_in, &write_args, errp);
+    if (ret_upd && errp && *errp == NULL)
         error_setg(errp, "Failed to update backend args");
 
     virtio_accel_backend_timer_stop(b, sess->id, "do op > update args", errp);
 
     cleanup_vaccel_args(&read_args, &write_args);
-    return ret;
+    return (ret != VIRTIO_ACCEL_OK) ? ret : ret_upd;
 }
 
 static int virtio_accel_vaccel_operation(VirtIOAccelBackend *b,
